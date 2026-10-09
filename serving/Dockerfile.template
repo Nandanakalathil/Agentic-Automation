@@ -1,0 +1,27 @@
+# Standard serving image. Build context = repo root; this file lives at .mdp/Dockerfile.
+# The adapter_builder agent may change BASE_IMAGE and the "repo-specific" block only.
+ARG BASE_IMAGE=python:3.11-slim
+FROM ${BASE_IMAGE}
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    MDP_MODEL_DIR=/opt/ml/model \
+    PYTHONPATH=/opt/mdp:/opt/program
+
+WORKDIR /opt/program
+
+# ---- repo-specific: system packages -------------------------------------
+# RUN apt-get update && apt-get install -y --no-install-recommends libgl1 && rm -rf /var/lib/apt/lists/*
+
+# ---- repo-specific: python dependencies ---------------------------------
+COPY .mdp/requirements-serving.txt /tmp/requirements-serving.txt
+RUN pip install jsonschema && pip install -r /tmp/requirements-serving.txt
+
+# ---- repo code (+ any weights the adapter expects inside the image) -----
+COPY . /opt/program
+
+# ---- standard serving layer (do not edit) -------------------------------
+COPY .mdp/serve.py .mdp/envelope.py .mdp/model_adapter.py .mdp/endpoint_schema.json /opt/mdp/
+EXPOSE 8080
+ENTRYPOINT ["python", "/opt/mdp/serve.py"]

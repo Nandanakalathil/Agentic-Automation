@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "model-pipeline/endpoint-schema/v1",
+  "title": "Standard inference endpoint contract (PLACEHOLDER - replace with your schema)",
+  "description": "Every endpoint deployed by the pipeline accepts `request` and returns `response` (HTTP 200) or `error` (HTTP 4xx/5xx). Keep the three top-level keys under $defs; the pipeline reads them by name.",
+  "$defs": {
+    "request": {
+      "type": "object",
+      "required": ["inputs"],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {"type": "string", "maxLength": 128},
+        "inputs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "description": "Batch of model inputs. Item shape is model-specific (text, base64 image, numeric array, object)."
+        },
+        "parameters": {
+          "type": "object",
+          "description": "Optional model-specific inference parameters (e.g. threshold, top_k, max_new_tokens).",
+          "default": {}
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "required": ["request_id", "model", "outputs", "latency_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {"type": "string"},
+        "model": {
+          "type": "object",
+          "required": ["name", "version"],
+          "properties": {
+            "name": {"type": "string"},
+            "version": {"type": "string"}
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "description": "One output per input, same order as `inputs`."
+        },
+        "latency_ms": {"type": "number", "minimum": 0}
+      }
+    },
+    "error": {
+      "type": "object",
+      "required": ["request_id", "error"],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {"type": "string"},
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": {"type": "string", "enum": ["INVALID_REQUEST", "MODEL_ERROR", "TIMEOUT", "INTERNAL"]},
+            "message": {"type": "string"}
+          }
+        }
+      }
+    }
+  }
+}

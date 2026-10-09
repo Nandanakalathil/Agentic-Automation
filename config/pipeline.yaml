@@ -1,0 +1,97 @@
+# Pipeline configuration. Every value here can be changed without touching code.
+
+llm:
+  # NVIDIA NIM / API catalog (OpenAI-compatible). Free developer credits.
+  # Key from https://build.nvidia.com - still read from the OPENROUTER_API_KEY env
+  # var (llm.py reads that name whatever the backend is).
+  base_url: https://integrate.api.nvidia.com/v1
+  # Models per stage. Must support tool calling; browse https://build.nvidia.com
+  # Swap freely - each stage is independent.
+  # UNVERIFIED: NVIDIA's catalog does not expose tool-calling support or context
+  # length, so these picks are judgement, not checked facts. If an agent fails
+  # immediately with a tool-call error, the model lacks tool support - swap it.
+  models:
+    repo_analysis: moonshotai/kimi-k3            # long-context code reading
+    ec2_plan: deepseek-ai/deepseek-v4.1-flash
+    test_fixer: moonshotai/kimi-k3               # hardest stage: debugging installs/tests
+    sagemaker_plan: deepseek-ai/deepseek-v4.1-flash
+    adapter_builder: moonshotai/kimi-k3          # writes model_adapter.py for the schema
+    summarizer: z-ai/glm-5.3-flash               # reports
+  # Free-tier budget. NVIDIA bills per CALL, not per token: ~1000 credits, one
+  # per API call. A full run is ~138 calls. Check build.nvidia.com for your real
+  # number and set it here - the ledger is only as right as this value.
+  free_tier_credits: 1000
+  warn_at_remaining: 150
+  temperature: 0.1
+  max_output_tokens: 8192
+  request_timeout_s: 300
+  # OpenRouter-only routing field. MUST stay null on NVIDIA/Gemini/etc - other
+  # backends reject the unknown "provider" key in the request body (llm.py:26).
+  provider_preferences: null
+
+# ---------------------------------------------------------------------------
+# Previous OpenRouter config - restore by swapping this block back in.
+# Both slugs verified live and tool-capable; qwen3-coder $0.30/M in, $1.00/M out.
+#
+#   base_url: https://openrouter.ai/api/v1
+#   models:
+#     repo_analysis: qwen/qwen3-coder
+#     ec2_plan: deepseek/deepseek-chat-v3.1
+#     test_fixer: qwen/qwen3-coder
+#     sagemaker_plan: deepseek/deepseek-chat-v3.1
+#     adapter_builder: qwen/qwen3-coder
+#     summarizer: deepseek/deepseek-chat-v3.1
+#   provider_preferences:
+#     data_collection: deny
+# ---------------------------------------------------------------------------
+
+agent:
+  max_steps: 40               # tool-call iterations per agent run
+  max_tool_output_chars: 12000
+  context_char_budget: 400000 # older tool outputs get elided past this
+  max_fix_attempts: 3         # test-fix and adapter-fix retry loops
+  analyst_extra_steps: 40     # the repo analyst reads more than it acts; it gets max_steps + this
+
+repo:
+  clone_timeout_s: 1800       # a stalled clone must fail, not hang the run forever
+
+aws:
+  region: us-east-1
+  profile: null               # null = default credential chain
+  artifact_bucket: null       # S3 bucket for workspace sync; created by scripts/bootstrap_aws.sh
+  ec2:
+    instance_profile: model-pipeline-ec2-role
+    # Deep Learning Base AMI (Ubuntu 22.04, NVIDIA driver, Docker). Resolved via SSM.
+    ami_ssm_parameter: /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id
+    root_volume_gb: 150
+    subnet_id: null           # null = default VPC
+    security_group_ids: []    # SSM needs no inbound ports
+    allowed_instance_types: [t3.xlarge, m6i.2xlarge, g5.xlarge, g5.2xlarge, g6.xlarge, g6.2xlarge, g5.12xlarge]
+    max_hourly_usd: 6.0
+    auto_teardown: true
+    self_destruct_hours: 24   # instance terminates itself after this, even if the pipeline dies
+                              # (covers waiting at the SageMaker approval gate; a dead instance is
+                              # re-provisioned automatically, replaying the approved setup)
+    command_timeout_s: 3600
+  sagemaker:
+    execution_role_name: model-pipeline-sagemaker-role
+    ecr_repository: model-pipeline-endpoints
+    allowed_instance_types: [ml.m5.xlarge, ml.c5.2xlarge, ml.g5.xlarge, ml.g5.2xlarge, ml.g6.xlarge, ml.g5.12xlarge]
+    max_hourly_usd: 8.0
+    delete_endpoint_on_failure: true   # don't leave a broken endpoint billing after the last retry
+    autoscaling:
+      min_capacity: 1
+      max_capacity: 4
+      target_invocations_per_instance: 50   # per minute; agent may propose a value
+      scale_in_cooldown_s: 600
+      scale_out_cooldown_s: 120
+    alarms:
+      p95_latency_ms: 2000
+      error_rate_pct: 5
+      sns_topic_arn: null     # optional; alarms are created without actions if null
+    load_test:
+      concurrency: 8
+      requests: 200
+
+schema_path: schema/endpoint_schema.json
+runs_dir: runs
