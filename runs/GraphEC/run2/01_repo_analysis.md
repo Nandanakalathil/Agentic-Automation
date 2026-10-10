@@ -4,7 +4,7 @@
 |---|---|
 | Repository | https://github.com/biomed-AI/GraphEC |
 | Run ID | `GraphEC/run2` |
-| Generated | 2026-10-10 06:03 UTC |
+| Generated | 2026-10-10 08:05 UTC |
 
 ## Read this first
 
@@ -235,7 +235,7 @@ flowchart TD
 | Notes | Code is Apache-2.0 (commercial OK). Bundled GraphEC checkpoints carry no stated licence. External dependencies (ProtT5, ESMFold weights) have their own terms. |
 
 ## Tests
-**No test suite, and no reference outputs.** Correctness cannot be verified before deployment - the golden cases in the serving contract are the only check.
+**No test suite.** The repo ships a reference input/output pair (`Data/fasta/EC_number.fasta` -> `EC_number/results/example_top5.txt`), which can serve as a regression check instead of a test run. 10 proteins; for E0VIU9 the top EC should be 2.3.2.31 at 0.999.
 
 ## Functions and classes
 | File | Name | Signature | Purpose |
