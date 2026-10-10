@@ -234,13 +234,6 @@ flowchart TD
 | Attribution required | False |
 | Notes | Code is Apache-2.0 (commercial OK). Bundled GraphEC checkpoints carry no stated licence. External dependencies (ProtT5, ESMFold weights) have their own terms. |
 
-## Tests
-- Framework: none
-- Paths: 
-- Command: ``
-- Approx. count: 0
-- Needs GPU: False / needs weights: False
-
 ## Functions and classes
 | File | Name | Signature | Purpose |
 |---|---|---|---|
