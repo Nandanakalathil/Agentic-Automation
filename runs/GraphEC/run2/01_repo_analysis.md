@@ -4,7 +4,7 @@
 |---|---|
 | Repository | https://github.com/biomed-AI/GraphEC |
 | Run ID | `GraphEC/run2` |
-| Generated | 2026-10-09 12:46 UTC |
+| Generated | 2026-10-10 05:30 UTC |
 
 ## Read this first
 
@@ -27,9 +27,6 @@
 > **WARNING: Shell-outs and destructive rm in pipeline** — label_diffusion.py and features.py use os.system for DIAMOND/mkdssp and 'rm' intermediates in the CWD; bundled binaries are Linux x86 and may need chmod 755.
 >
 > **INFO: Project appears unmaintained** — Last commit 2025-08-13 (~14 months ago at analysis); citation never published; no tests or CI.
-
-## What this is
-GraphEC identifies enzyme active sites, then trains a geometric graph neural network (TransformerConv-based, 5-fold ensemble) on ESMFold-predicted structures augmented with ProtT5-XL sequence embeddings and DSSP features. A label diffusion algorithm over a DIAMOND homology network against the training set improves EC prediction. A third head predicts optimum pH (acidic/neutral/alkaline).
 
 ## Quickstart
 
@@ -179,8 +176,8 @@ flowchart TD
 | Input format | FASTA file (>ID newline sequence); features cached per ID under ./Data/ |
 | Output format | text files under <task>/results/: top-5 EC list + full score vector (EC_number), per-residue scores (Active_sites), class label (Optimum_pH) |
 
-## Scripts
-| Path | Kind | Purpose | Invocation |
+## Files
+| Path | Kind | Purpose | How to run |
 |---|---|---|---|
 | `run.sh` | shell | wrapper for main.py | `bash run.sh <EC_number\|ActiveSite\|Optimum_pH> <fasta> <gpu_num>` |
 | `main.py` | cli | fasta parsing, feature extraction, task dispatch | `python main.py --task EC_number --fasta ./Data/fasta/EC_number.fasta --gpu 0` |
@@ -188,6 +185,12 @@ flowchart TD
 | `Active_sites/main.py` | cli | active-site prediction entry | `python ./Active_sites/main.py --gpu 0` |
 | `Optimum_pH/main.py` | cli | optimum pH prediction entry | `python ./Optimum_pH/main.py --gpu 0` |
 | `Features/esmfold/esmfold.py` | cli | run ESMFold to predict PDB structures | `python ./Features/esmfold/esmfold.py -i in.fasta -o out_dir --chunk-size 128` |
+| `Features/features.py` | module | feature extraction: ProtT5 embeddings, ESMFold coords, DSSP | - |
+| `EC_number/utils.py` | module | EC inference: 5-fold ensemble predict + result writing | - |
+| `EC_number/label_diffusion.py` | module | homology network (DIAMOND) + label diffusion | - |
+| `EC_number/model.py` | module | GraphEC GNN (TransformerConv layers) | - |
+| `Active_sites/utils.py` | module | active-site per-residue inference | - |
+| `Optimum_pH/utils.py` | module | optimum pH inference | - |
 
 ## Assets
 | Path | Kind | Size (MB) | Availability | Description |
@@ -237,18 +240,6 @@ flowchart TD
 - Command: ``
 - Approx. count: 0
 - Needs GPU: False / needs weights: False
-
-## Key files
-| Path | Role |
-|---|---|
-| `main.py` | top-level dispatcher: parses fasta, extracts features, calls task main.py |
-| `run.sh` | thin wrapper: python main.py --task $1 --fasta $2 --gpu $3 |
-| `Features/features.py` | feature extraction: ProtT5 embeddings, ESMFold coords, DSSP |
-| `EC_number/utils.py` | EC inference: 5-fold ensemble predict + result writing |
-| `EC_number/label_diffusion.py` | homology network (DIAMOND) + label diffusion |
-| `EC_number/model.py` | GraphEC GNN (TransformerConv layers) |
-| `Active_sites/utils.py` | active-site per-residue inference |
-| `Optimum_pH/utils.py` | optimum pH inference |
 
 ## Functions and classes
 | File | Name | Signature | Purpose |

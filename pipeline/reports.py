@@ -142,6 +142,29 @@ def _alerts_banner(alerts: list[dict], risks: list[str]) -> str:
     return out
 
 
+def _files_table(scripts: list[dict], key_files: list[dict]) -> str:
+    """Runnable entry points and the modules behind them, in one table.
+
+    They answer different questions - what do I type, versus where does the
+    logic live - so `Kind` keeps that distinction rather than losing it to the
+    merge. Scripts come first because that is the order someone reads in, and a
+    path appearing in both (a dispatcher is both runnable and the logic) is
+    listed once with its invocation.
+    """
+    seen, out = set(), []
+    for s in scripts:
+        path = s.get("path", "")
+        seen.add(path)
+        out.append(f"| `{path}` | {s.get('kind') or 'script'} | {s.get('purpose', '')} "
+                   f"| {_code(s.get('invocation'))} |")
+    for f in key_files:
+        path = f.get("path", "")
+        if path in seen:
+            continue
+        out.append(f"| `{path}` | module | {f.get('role', '')} | - |")
+    return "\n".join(out) or "| _none recorded_ | | | |"
+
+
 def _io_table(items: list[dict], what: str, *, show_required: bool = True) -> str:
     """`required` is meaningless for an output, so the column is dropped there."""
     if not items:
@@ -211,9 +234,7 @@ def repo_analysis(state: dict, analysis: dict, agent_text: str) -> str:
         f"| {c.get('supported', 'yes')} | {c.get('notes', '')} |"
         for c in a.get("capabilities") or []) or "| _none recorded_ | | | | | |"
 
-    scripts = "\n".join(
-        f"| `{s.get('path', '')}` | {s.get('kind', '')} | {s.get('purpose', '')} | {_code(s.get('invocation'))} |"
-        for s in a.get("scripts") or []) or "| _none recorded_ | | | |"
+    files_table = _files_table(a.get("scripts") or [], a.get("key_files") or [])
 
     assets = "\n".join(
         f"| `{s.get('path', '')}` | {s.get('kind', '')} | {s.get('size_mb') if s.get('size_mb') is not None else '-'} "
@@ -222,7 +243,6 @@ def repo_analysis(state: dict, analysis: dict, agent_text: str) -> str:
 
     # `or []`, not a get() default: LLM-repaired JSON sets missing lists to null,
     # which a default never catches.
-    rows = "\n".join(f"| `{f['path']}` | {f['role']} |" for f in a.get("key_files") or []) or "| _none_ | |"
     fns = "\n".join(f"| `{f['file']}` | `{f['name']}` | `{f.get('signature', '')}` | {f.get('purpose', '')} |"
                     for f in a.get("functions") or []) or "| _none_ | | | |"
 
@@ -230,7 +250,7 @@ def repo_analysis(state: dict, analysis: dict, agent_text: str) -> str:
     return (
         _header("Repository Analysis", state)
         + _alerts_banner(a.get("alerts") or [], a.get("risks") or [])
-        + f"\n## What this is\n{m.get('details') or a.get('summary', '')}\n\n"
+        + "\n"
         + _quickstart_block(a.get("quickstart") or {})
         + f"## Metadata\n| | |\n|---|---|\n{meta}\n\n"
         f"## What it can do\n| Task | Entrypoint | Inputs | Outputs | Supported | Notes |\n"
@@ -242,7 +262,7 @@ def repo_analysis(state: dict, analysis: dict, agent_text: str) -> str:
         f"## Inference entrypoint\n| | |\n|---|---|\n| File | `{inf.get('file', '')}` |\n"
         f"| Function/class | `{inf.get('function_or_class', '')}` |\n| How to call | {inf.get('how_to_call', '')} |\n"
         f"| Input format | {inf.get('input_format', '')} |\n| Output format | {inf.get('output_format', '')} |\n\n"
-        f"## Scripts\n| Path | Kind | Purpose | Invocation |\n|---|---|---|---|\n{scripts}\n\n"
+        f"## Files\n| Path | Kind | Purpose | How to run |\n|---|---|---|---|\n{files_table}\n\n"
         f"## Assets\n| Path | Kind | Size (MB) | Availability | Description |\n|---|---|---|---|---|\n{assets}\n\n"
         f"## Compute requirements\n| | |\n|---|---|\n"
         f"| GPU required | {hw.get('gpu_required')} |\n| Runs on CPU | {hw.get('cpu_only_supported')} |\n"
@@ -258,7 +278,6 @@ def repo_analysis(state: dict, analysis: dict, agent_text: str) -> str:
         f"## Tests\n- Framework: {t.get('framework')}\n- Paths: {', '.join(t.get('paths', []))}\n"
         f"- Command: `{t.get('command')}`\n- Approx. count: {t.get('approx_count')}\n"
         f"- Needs GPU: {t.get('needs_gpu')} / needs weights: {t.get('needs_weights')}\n\n"
-        f"## Key files\n| Path | Role |\n|---|---|\n{rows}\n\n"
         f"## Functions and classes\n| File | Name | Signature | Purpose |\n|---|---|---|---|\n{fns}\n\n"
         f"## Dependencies\n- Files: {', '.join(a.get('dependency_files', []))}\n"
         f"- Notable: {', '.join(a.get('notable_dependencies', []))}\n"

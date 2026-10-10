@@ -84,7 +84,7 @@ def test_machine_findings_are_separated_from_analyst_judgement():
 def test_agent_freeform_risks_do_not_reach_the_banner():
     """Only the prefixed, machine-checked findings are presented as fact."""
     out = render(risks=["the code is a bit messy"])
-    assert "the code is a bit messy" not in out.split("## What this is")[0]
+    assert "the code is a bit messy" not in out.split("## Metadata")[0]
 
 
 def test_clean_repo_says_so():
@@ -233,3 +233,37 @@ def test_freeform_risks_dropped_when_structured_alerts_exist():
 def test_freeform_risks_kept_when_there_are_no_alerts():
     out = render(risks=["pinned torch is two years old"])
     assert "## Other notes" in out and "pinned torch" in out
+
+
+# ------------------------------------------------------- merged files table
+def test_scripts_and_key_files_render_as_one_table():
+    out = render(scripts=[{"path": "run.sh", "kind": "shell", "purpose": "wrapper",
+                           "invocation": "bash run.sh"}],
+                 key_files=[{"path": "model.py", "role": "the GNN"}])
+    assert "## Files" in out
+    assert "## Scripts" not in out and "## Key files" not in out
+    assert "`run.sh`" in out and "`model.py`" in out
+
+
+def test_runnable_and_internal_stay_distinguishable():
+    """Merging the tables must not lose which files you can actually invoke."""
+    out = render(scripts=[{"path": "run.sh", "kind": "shell", "invocation": "bash run.sh"}],
+                 key_files=[{"path": "model.py", "role": "the GNN"}])
+    files = out.split("## Files")[1].split("##")[0]
+    assert "| shell |" in files and "| module |" in files
+    assert "bash run.sh" in files
+
+
+def test_a_path_in_both_lists_appears_once():
+    out = render(scripts=[{"path": "main.py", "kind": "cli", "purpose": "dispatch",
+                           "invocation": "python main.py"}],
+                 key_files=[{"path": "main.py", "role": "top-level dispatcher"}])
+    assert out.count("`main.py`") == 1
+    assert "python main.py" in out          # the invocation is what survives
+
+
+def test_what_this_is_section_removed():
+    """It duplicated Metadata -> Details word for word."""
+    out = render(metadata={"details": "a unique sentence about the model"})
+    assert "## What this is" not in out
+    assert out.count("a unique sentence about the model") == 1
