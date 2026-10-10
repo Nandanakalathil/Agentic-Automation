@@ -4,10 +4,18 @@
 aws_credentials_backup.txt
 
 # --- pipeline output ---------------------------------------------------
-# runs/ holds cloned repos, agent transcripts (which contain the analysed
-# repo's source), checkpoints.sqlite and the credit ledger. None of it belongs
-# in version control.
-runs/
+# Keep the generated reports; drop everything else a run leaves behind. The
+# clone under repo/ is someone else's source tree, and .state/ holds agent
+# transcripts (which quote that source), the checkpoint db and the ledger.
+runs/**
+!runs/**/
+!runs/**/*.md
+# The clone has its own .git, so naming only its contents makes git add it as a
+# submodule gitlink instead. The directory itself has to be excluded.
+runs/**/repo
+runs/**/repo/**
+runs/**/.state
+runs/**/.state/**
 
 # --- environments and caches -------------------------------------------
 .venv/
