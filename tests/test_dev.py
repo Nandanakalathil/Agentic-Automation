@@ -9,6 +9,7 @@ import json
 import pytest
 
 from pipeline import dev
+from pipeline.nodes import STATE_DIR
 
 
 @pytest.fixture
@@ -20,10 +21,12 @@ def cfg(tmp_path, monkeypatch):
 
 
 def make_run(tmp_path, name="r1", **files):
+    """A previous run: the report at the top, machine state in .state/."""
     d = tmp_path / name
     (d / "repo").mkdir(parents=True)
+    (d / STATE_DIR).mkdir(parents=True)
     for fn, obj in files.items():
-        (d / fn).write_text(json.dumps(obj))
+        (d / STATE_DIR / fn).write_text(json.dumps(obj))
     return d
 
 
@@ -98,5 +101,15 @@ def test_update_is_persisted_for_the_next_agent(cfg, tmp_path, monkeypatch):
     monkeypatch.setattr("pipeline.nodes.Nodes.plan_ec2",
                         lambda self, state: {"ec2_plan": {"instance_type": "g5.xlarge"}})
     dev.run_agent_standalone(cfg, "ec2_planner", from_run="r1")
-    saved = json.loads((d / "state.json").read_text())
+    saved = json.loads((d / STATE_DIR / "state.json").read_text())
     assert saved["ec2_plan"]["instance_type"] == "g5.xlarge"
+
+
+def test_the_run_directory_shows_only_the_report(cfg, tmp_path, monkeypatch):
+    """One run, one deliverable. Working files exist but stay out of the way."""
+    d = make_run(tmp_path, **{"analysis.json": {"summary": "x"}})
+    monkeypatch.setattr("pipeline.nodes.Nodes.plan_ec2", lambda self, state: {"ec2_plan": {}})
+    dev.run_agent_standalone(cfg, "ec2_planner", from_run="r1")
+    visible = sorted(p.name for p in d.iterdir() if not p.name.startswith("."))
+    assert visible == ["repo"]          # no state.json, no analysis.json at the top
+    assert (d / STATE_DIR / "state.json").exists()

@@ -199,3 +199,32 @@ def test_review_survives_wrong_types(repo):
     a = {"summary": "x", "task": "y", "key_files": None, "functions": None,
          "inference": {}, "tests": {}, "hardware": {}, "dependency_files": None}
     assert isinstance(verify.review(a, scan(repo), repo, hit_step_limit=False), list)
+
+
+# ------------------------------------------------- licence name normalisation
+@pytest.mark.parametrize("declared,in_file", [
+    ("apache-2.0", "Apache License"),                 # the real GraphEC false positive
+    ("Apache License 2.0", "Apache-2.0"),
+    ("Apache License, Version 2.0", "Apache-2.0"),
+    ("MIT", "MIT License"),
+    ("BSD-3-Clause", "BSD 3-Clause License"),
+])
+def test_same_licence_written_differently_is_not_a_contradiction(repo, declared, in_file):
+    pf = scan(repo)
+    pf.licence.name, pf.licence.file = in_file, "LICENSE"
+    a = good_analysis()
+    a["licensing"]["code"] = declared
+    assert not any("the file wins" in c for c in verify.contradictions(a, pf))
+
+
+@pytest.mark.parametrize("declared,in_file", [
+    ("MIT", "Apache License"),
+    ("GPL-3.0", "MIT License"),
+    ("BSD-3-Clause", "Mozilla Public License"),
+])
+def test_genuinely_different_licences_still_flagged(repo, declared, in_file):
+    pf = scan(repo)
+    pf.licence.name, pf.licence.file = in_file, "LICENSE"
+    a = good_analysis()
+    a["licensing"]["code"] = declared
+    assert any("the file wins" in c for c in verify.contradictions(a, pf))

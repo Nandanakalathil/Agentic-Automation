@@ -1,7 +1,28 @@
-.DS_Store
-__pycache__/
+# --- secrets -----------------------------------------------------------
+.env
 *.pem
 aws_credentials_backup.txt
-.env
+
+# --- pipeline output ---------------------------------------------------
+# runs/ holds cloned repos, agent transcripts (which contain the analysed
+# repo's source), checkpoints.sqlite and the credit ledger. None of it belongs
+# in version control.
+runs/
+
+# --- environments and caches -------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- os / editor -------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+
+# --- local scratch -----------------------------------------------------
 alphafast-run/
 *.zip

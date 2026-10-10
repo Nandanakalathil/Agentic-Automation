@@ -45,9 +45,26 @@ def _short(args: dict) -> str:
     return s if len(s) < 90 else s[:87] + "..."
 
 
+STATE_DIR = ".state"   # machine-readable files live here; the run dir holds the report
+
+
+def _internal(state: PipelineState, name: str, content: str) -> Path:
+    """Write a machine-readable file out of the user's way.
+
+    A run directory should contain the document someone asked for, not the
+    pipeline's working notes. Everything here is still on disk for the next
+    agent and for debugging - just not presented as output.
+    """
+    p = Path(state["run_dir"]) / STATE_DIR / name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content)
+    return p
+
+
 def _resources(state: PipelineState, **kv) -> None:
     """Persist created cloud resources immediately (survives crashes before the node returns)."""
-    p = Path(state["run_dir"]) / "resources.json"
+    p = Path(state["run_dir"]) / STATE_DIR / "resources.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
     data = json.loads(p.read_text()) if p.exists() else {}
     data.update(kv)
     p.write_text(json.dumps(data, indent=2))
@@ -70,7 +87,7 @@ class Nodes:
             max_steps=max_steps or self.agent_cfg["max_steps"],
             max_tool_output_chars=self.agent_cfg["max_tool_output_chars"],
             context_char_budget=self.agent_cfg["context_char_budget"],
-            log_dir=Path(state["run_dir"]) / "logs", on_step=_step_printer(name),
+            log_dir=Path(state["run_dir"]) / STATE_DIR / "logs", on_step=_step_printer(name),
         )
 
     def _structured(self, stage, text, model_cls, run_id=""):
@@ -115,7 +132,7 @@ class Nodes:
         # Deterministic scan first: free, offline, and it stops the analyst spending
         # steps rediscovering requirements.txt. Also the only reliable licence check.
         pf = preflight.scan(Path(state["workspace"]))
-        (Path(state["run_dir"]) / "preflight.json").write_text(json.dumps(pf.to_dict(), indent=2))
+        _internal(state, "preflight.json", json.dumps(pf.to_dict(), indent=2))
         _print(f"preflight: {len(pf.build_files)} build files, licence={pf.licence.name or 'unknown'}"
                + (f", bio stack: {', '.join(pf.bio_deps)}" if pf.is_bio else ""))
         warning = preflight.licence_warning(pf)
@@ -124,6 +141,9 @@ class Nodes:
 
         tools = make_repo_tools(Path(state["workspace"]), writable=False)
         res = self._agent(state, name="repo_analyst", stage="repo_analysis",
+                          # The prose report stays REQUESTED but is not rendered: it is the model's
+                          # reasoning space, and removing it emptied every structured field
+                          # (measured - a run with with_report=False returned a blank analysis).
                           system=prompts.REPO_ANALYST + prompts.output_contract(RepoAnalysis),
                           task=(f"Analyse the repository cloned from {state['repo_url']} "
                                 f"(commit {state.get('commit_sha')}).\n\n{preflight.to_prompt_block(pf)}"),
@@ -146,7 +166,7 @@ class Nodes:
         analysis["verification"] = {"hit_step_limit": res.hit_step_limit, "steps": res.steps,
                                     "findings": gate_findings}
         analysis["preflight"] = pf.to_dict()
-        (Path(state["run_dir"]) / "analysis.json").write_text(json.dumps(analysis, indent=2))
+        _internal(state, "analysis.json", json.dumps(analysis, indent=2))
         md = reports.repo_analysis(state, analysis, res.final_text)
         return {"analysis": analysis, "artifacts": self._artifact(state, "01_repo_analysis", "01_repo_analysis.md", md)}
 

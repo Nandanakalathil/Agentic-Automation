@@ -237,7 +237,7 @@ def cmd_agent(cfg, a) -> int:
             return 1
     try:
         update = run_agent_standalone(cfg, a.agent, repo_url=a.repo, from_run=a.from_run,
-                                      instance_id=a.instance, repo_ref=a.ref)
+                                      instance_id=a.instance, repo_ref=a.ref, run_id=a.run_id)
     except ValueError as e:
         print(f"[dev] {e}")
         return 1
@@ -305,6 +305,7 @@ def main(argv=None) -> int:
     r.add_argument("--from-run", help="reuse a previous run's analysis/plans")
     r.add_argument("--instance", help="existing EC2 instance id for test_fixer / adapter_builder")
     r.add_argument("--ref", help="git ref to check out when using --repo")
+    r.add_argument("--run-id", help="name the output folder, e.g. GraphEC/run2")
     r = sub.add_parser("cleanup")
     r.add_argument("--run-id")
     r.add_argument("--endpoints", action="store_true", help="also delete pipeline-created SageMaker endpoints")

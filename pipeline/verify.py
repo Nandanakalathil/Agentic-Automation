@@ -99,6 +99,21 @@ def completeness_gaps(analysis: dict) -> list[str]:
     return gaps
 
 
+# Licence names vary in punctuation, version and the word "licence": Apache-2.0,
+# "Apache License 2.0" and "Apache License, Version 2.0" are one licence. Compare
+# the family word only, or every Apache repo reports a false contradiction.
+_LICENCE_NOISE = re.compile(r"\b(licen[sc]e|version|v?\d+(\.\d+)*|the|of|public)\b|[^a-z0-9 ]")
+
+
+def _licence_key(name: str) -> set[str]:
+    return set(_LICENCE_NOISE.sub(" ", (name or "").lower()).split())
+
+
+def _same_licence(a: str, b: str) -> bool:
+    ka, kb = _licence_key(a), _licence_key(b)
+    return bool(ka and kb and (ka & kb))
+
+
 def contradictions(analysis: dict, pf: Any) -> list[str]:
     """Places the agent disagrees with the deterministic scan. The scan read the files."""
     out: list[str] = []
@@ -116,7 +131,7 @@ def contradictions(analysis: dict, pf: Any) -> list[str]:
         out.append("scan found weight references but the analysis recorded no weights source")
     licensing = analysis.get("licensing") or {}
     lic = (licensing.get("code") or analysis.get("license") or "").strip().lower()
-    if pf.licence.name and lic and pf.licence.name.lower() not in lic and lic not in pf.licence.name.lower():
+    if pf.licence.name and lic and not _same_licence(lic, pf.licence.name):
         out.append(f"analysis says code licence '{lic}' but {pf.licence.file or 'the LICENSE file'} "
                    f"reads as '{pf.licence.name}' - the file wins")
     if pf.weights_licence.blocking and licensing.get("commercial_use") == "yes":

@@ -71,9 +71,9 @@ AWS_REGION=us-east-1 ./scripts/bootstrap_aws.sh   # one-time: bucket, IAM roles,
 .venv/bin/python -m pytest                 # offline tests, no AWS or LLM calls
 ```
 
-The API key goes in `OPENROUTER_API_KEY` **whatever the backend is** — `llm.py` reads that
-variable name regardless of provider. For NVIDIA NIM, get a key at
-[build.nvidia.com](https://build.nvidia.com).
+The API key goes in `NVIDIA_API_KEY`. Get one free at
+[build.nvidia.com](https://build.nvidia.com). The provider is chosen by `llm.base_url`
+in `config/pipeline.yaml`, not by the variable name — any OpenAI-compatible endpoint works.
 
 **Permissions the person running the pipeline needs:** EC2 (run/terminate/describe instances), SSM (send-command, get-parameter), S3 on the artifact bucket, ECR, SageMaker (models, endpoint configs, endpoints), Application Auto Scaling, CloudWatch alarms, CloudWatch Logs (read), `iam:GetRole`, `iam:PassRole` on the two pipeline roles, and `iam:CreateServiceLinkedRole` (the first time autoscaling is used).
 

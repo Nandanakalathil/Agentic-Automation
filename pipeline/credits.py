@@ -84,16 +84,26 @@ class Ledger:
 
     # ---------------------------------------------------------------- state
     @property
+    def capped(self) -> bool:
+        """False when the provider has no total cap, only a rate limit.
+
+        NVIDIA's free tier works this way: `Up to 40 rpm` and no credit balance.
+        The ledger still counts calls - knowing a run cost 138 is useful - but
+        there is nothing to run out of, so it must not warn as though there is.
+        """
+        return self.budget > 0
+
+    @property
     def used(self) -> int:
         return self.total.calls
 
     @property
     def remaining(self) -> int:
-        return max(self.budget - self.used, 0)
+        return max(self.budget - self.used, 0) if self.capped else 0
 
     @property
     def exhausted(self) -> bool:
-        return self.remaining <= 0
+        return self.capped and self.remaining <= 0
 
     def record(self, *, stage: str, run_id: str, model: str,
                input_tokens: int = 0, output_tokens: int = 0) -> None:
@@ -111,10 +121,18 @@ class Ledger:
 
     # --------------------------------------------------------------- output
     def summary(self) -> str:
-        pct = 100 * self.used / self.budget if self.budget else 0
+        if not self.capped:
+            lines = ["", "  API usage  (no credit cap on this tier - rate limited only)",
+                     f"  {self.used} calls made so far"]
+            if self.total.input_tokens:
+                lines.append(f"  tokens: {self.total.input_tokens / 1e6:.2f}M in / "
+                             f"{self.total.output_tokens / 1000:.1f}k out")
+            return "\n".join(lines)
+
+        pct = 100 * self.used / self.budget
         bar_len = 28
         filled = min(int(bar_len * pct / 100), bar_len)
-        bar = "█" * filled + "░" * (bar_len - filled)
+        bar = "=" * filled + "-" * (bar_len - filled)
         lines = [
             "",
             "  NVIDIA free-tier credits",
@@ -141,7 +159,9 @@ def ledger_path(cfg) -> Path:
 
 
 def load(cfg) -> Ledger:
-    return Ledger.load(ledger_path(cfg), int(cfg.get_path("llm.free_tier_credits", 1000) or 1000))
+    # `or 1000` would turn a deliberate 0 (uncapped) back into a cap.
+    budget = cfg.get_path("llm.free_tier_credits", 0)
+    return Ledger.load(ledger_path(cfg), int(budget) if budget is not None else 0)
 
 
 class CreditTracker(BaseCallbackHandler):
@@ -166,10 +186,10 @@ class CreditTracker(BaseCallbackHandler):
                            input_tokens=in_tok, output_tokens=out_tok)
                 led.save()
                 if led.remaining and led.remaining <= int(self.cfg.get_path("llm.warn_at_remaining", 150)):
-                    print(f"\n  ⚠️  LOW CREDITS: {led.remaining} calls left of {led.budget}. "
+                    print(f"\n  LOW CREDITS: {led.remaining} calls left of {led.budget}. "
                           f"A full run needs ~138.\n")
                 elif led.exhausted:
-                    print("\n  🛑 FREE TIER EXHAUSTED by the pipeline's own count. "
+                    print("\n  FREE TIER EXHAUSTED by the pipeline's own count. "
                           "Check build.nvidia.com before starting anything that provisions AWS.\n")
         except Exception:  # accounting must never break a run
             pass
@@ -178,15 +198,17 @@ class CreditTracker(BaseCallbackHandler):
 def preflight_check(cfg, planned_calls: int, what: str) -> str:
     """Warning text to show BEFORE starting work that might exhaust the tier. '' when fine."""
     led = load(cfg)
+    if not led.capped:          # nothing to exhaust; a rate limit is not a budget
+        return ""
     if led.exhausted:
-        return (f"🛑 Credits exhausted ({led.used}/{led.budget} by this pipeline's count). "
+        return (f"Credits exhausted ({led.used}/{led.budget} by this pipeline's count). "
                 f"{what} needs ~{planned_calls} more. Verify at build.nvidia.com before continuing.")
     if planned_calls > led.remaining:
-        return (f"⚠️  {what} needs ~{planned_calls} calls but only {led.remaining} remain. "
+        return (f"{what} needs ~{planned_calls} calls but only {led.remaining} remain. "
                 f"It will likely stop part-way. "
                 f"{'An unfinished run can leave an EC2 instance billing - run `cleanup` if it dies.' if planned_calls > 100 else ''}")
     if planned_calls > led.remaining * 0.5:
-        return (f"⚠️  {what} needs ~{planned_calls} calls; {led.remaining} remain. "
+        return (f"{what} needs ~{planned_calls} calls; {led.remaining} remain. "
                 f"This will use over half of what is left.")
     return ""
 

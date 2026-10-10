@@ -11,9 +11,12 @@ from .credits import CreditTracker
 
 def get_llm(cfg: Config, stage: str, run_id: str = "") -> ChatOpenAI:
     """Return the chat model configured for a pipeline stage (see llm.models)."""
-    api_key = os.environ.get("OPENROUTER_API_KEY")
+    # OPENROUTER_API_KEY is still honoured so an existing .env keeps working; the
+    # provider is chosen by llm.base_url, not by which variable holds the key.
+    api_key = os.environ.get("NVIDIA_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
-        raise RuntimeError("OPENROUTER_API_KEY is not set (put it in .env or the environment).")
+        raise RuntimeError("NVIDIA_API_KEY is not set (put it in .env or the environment). "
+                           "Get one at https://build.nvidia.com")
 
     llm_cfg = cfg["llm"]
     model = llm_cfg["models"].get(stage)

@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Config
-from .nodes import Nodes
+from .nodes import STATE_DIR, Nodes
 from .state import PipelineState
 
 # agent name -> (node method, state keys it needs beyond run_dir/workspace, needs an instance)
@@ -51,14 +51,14 @@ def _load_state(run_dir: Path) -> PipelineState:
     exactly the case this tool is for.
     """
     state: dict[str, Any] = {}
-    sj = run_dir / "state.json"
+    sj = run_dir / STATE_DIR / "state.json"
     if sj.exists():
         state.update(json.loads(sj.read_text()))
     for key, name in (("analysis", "analysis.json"),
                       ("ec2_plan", "ec2_plan.json"),
                       ("ec2_test_results", "ec2_test_results.json"),
                       ("sagemaker_plan", "sagemaker_plan.json")):
-        p = run_dir / name
+        p = run_dir / STATE_DIR / name
         if p.exists() and key not in state:
             state[key] = json.loads(p.read_text())
     return state  # type: ignore[return-value]
@@ -72,7 +72,7 @@ def _new_run_dir(cfg: Config, repo_url: str, suffix: str) -> tuple[str, Path]:
 
 def run_agent_standalone(cfg: Config, agent: str, *, repo_url: str | None = None,
                          from_run: str | None = None, instance_id: str | None = None,
-                         repo_ref: str | None = None) -> dict:
+                         repo_ref: str | None = None, run_id: str | None = None) -> dict:
     """Execute one node and return its state update. Raises ValueError on bad inputs."""
     if agent not in AGENTS:
         raise ValueError(f"unknown agent '{agent}'. Choose from: {', '.join(AGENTS)}")
@@ -91,7 +91,14 @@ def run_agent_standalone(cfg: Config, agent: str, *, repo_url: str | None = None
     else:
         if not repo_url:
             raise ValueError("pass --repo <url> (to start fresh) or --from-run <run_id>")
-        run_id, run_dir = _new_run_dir(cfg, repo_url, agent)
+        if run_id:
+            # A caller-chosen id may be nested ("GraphEC/run2") so repeated runs on
+            # one repo sit together and can be diffed.
+            run_dir = cfg.runs_dir / run_id
+            if any(part in ("..", "") for part in Path(run_id).parts):
+                raise ValueError(f"invalid --run-id {run_id!r}")
+        else:
+            run_id, run_dir = _new_run_dir(cfg, repo_url, agent)
         state = {"run_id": run_id, "repo_url": repo_url, "repo_ref": repo_ref, "run_dir": str(run_dir)}
         print(f"[dev] cloning into {run_dir}")
         state.update(nodes.setup_run(state))  # type: ignore[arg-type]
@@ -124,7 +131,9 @@ def run_agent_standalone(cfg: Config, agent: str, *, repo_url: str | None = None
     update = getattr(nodes, method)(state)
 
     merged = {**state, **update}
-    (Path(state["run_dir"]) / "state.json").write_text(json.dumps(merged, indent=2, default=str))
+    sj = Path(state["run_dir"]) / STATE_DIR / "state.json"
+    sj.parent.mkdir(parents=True, exist_ok=True)
+    sj.write_text(json.dumps(merged, indent=2, default=str))
     return update
 
 

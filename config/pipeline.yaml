@@ -2,8 +2,7 @@
 
 llm:
   # NVIDIA NIM / API catalog (OpenAI-compatible). Free developer credits.
-  # Key from https://build.nvidia.com - still read from the OPENROUTER_API_KEY env
-  # var (llm.py reads that name whatever the backend is).
+  # Key from https://build.nvidia.com, read from NVIDIA_API_KEY in .env.
   base_url: https://integrate.api.nvidia.com/v1
   # Models per stage. Must support tool calling; browse https://build.nvidia.com
   # Swap freely - each stage is independent.
@@ -17,9 +16,11 @@ llm:
     sagemaker_plan: deepseek-ai/deepseek-v4.1-flash
     adapter_builder: moonshotai/kimi-k3          # writes model_adapter.py for the schema
     summarizer: z-ai/glm-5.3-flash               # reports
-  # Free-tier budget. NVIDIA bills per CALL, not per token: ~1000 credits, one
-  # per API call. A full run is ~138 calls. Check build.nvidia.com for your real
-  # number and set it here - the ledger is only as right as this value.
+  # Total-call cap. NVIDIA's position is ambiguous: setup guides report 1000
+  # signup credits, their forum says credits were replaced by rate limits, and
+  # the account dropdown shows only "Up to 40 rpm". Assuming a cap is the safe
+  # error: a wrong warning is harmless, while being cut off mid-run can strand a
+  # billing EC2 instance. 0 disables the cap if you confirm there is none.
   free_tier_credits: 1000
   warn_at_remaining: 150
   temperature: 0.1

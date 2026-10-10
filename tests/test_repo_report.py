@@ -89,6 +89,7 @@ def test_agent_freeform_risks_do_not_reach_the_banner():
 
 def test_clean_repo_says_so():
     assert "No blocking issues found" in render()
+    assert "\u2705" not in render()
 
 
 def test_banner_precedes_everything():
@@ -182,3 +183,53 @@ def test_status_is_annotated_with_commit_age():
 def test_model_size_falls_back_to_bundled_weights():
     out = render(preflight={"tree": [], "bundled_weights_mb": 2600.0})
     assert "2.6 GB bundled in repo" in out
+
+
+# ------------------------------------------------------ no emojis, no repeats
+def test_report_contains_no_emoji():
+    out = render(alerts=[{"severity": "blocker", "title": "x"},
+                         {"severity": "warning", "title": "y"},
+                         {"severity": "info", "title": "z"}],
+                 risks=["LICENCE BLOCKER (weights): non-commercial"])
+    for ch in ("\U0001F6D1", "⚠", "ℹ", "✅", "█", "░"):
+        assert ch not in out, f"emoji {ch!r} still rendered"
+
+
+def test_severity_still_readable_without_icons():
+    out = render(alerts=[{"severity": "blocker", "title": "stop"}])
+    assert "BLOCKER: stop" in out
+
+
+def test_banner_risks_are_not_repeated_at_the_bottom():
+    """They were appearing twice: once in the banner, once in a trailing Risks list."""
+    out = render(risks=["LICENCE BLOCKER (weights): non-commercial clause"])
+    assert out.count("non-commercial clause") == 1
+
+
+def test_agent_freeform_risks_appear_once_under_other_notes():
+    out = render(risks=["pinned torch is two years old"])
+    assert out.count("pinned torch is two years old") == 1
+    assert "## Other notes" in out
+
+
+def test_no_other_notes_section_when_everything_was_in_the_banner():
+    out = render(risks=["HALLUCINATED PATH: ghost.py"])
+    assert "## Other notes" not in out
+
+
+def test_no_empty_risks_section_on_a_clean_repo():
+    assert "## Other notes" not in render()
+
+
+def test_freeform_risks_dropped_when_structured_alerts_exist():
+    """Models restate the same finding in both fields; rendering both repeats it."""
+    out = render(alerts=[{"severity": "blocker", "title": "Hardcoded ProtT5 path",
+                          "detail": "features.py line 39"}],
+                 risks=["Hardcoded ProtT5 path /home/x/Prot-T5 in Features/features.py"])
+    assert "## Other notes" not in out
+    assert out.count("Hardcoded ProtT5 path") == 1
+
+
+def test_freeform_risks_kept_when_there_are_no_alerts():
+    out = render(risks=["pinned torch is two years old"])
+    assert "## Other notes" in out and "pinned torch" in out

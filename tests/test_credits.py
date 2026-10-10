@@ -122,3 +122,69 @@ def test_accounting_never_breaks_a_run(cfg):
 def test_planned_calls_cover_every_dev_agent():
     from pipeline.dev import AGENTS
     assert set(AGENTS) <= set(credits.PLANNED_CALLS)
+
+
+# ------------------------------------------------------------- the API key
+def test_nvidia_api_key_is_read(monkeypatch):
+    from pipeline.config import load_config
+    from pipeline.llm import get_llm
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+    assert get_llm(load_config(), "repo_analysis") is not None
+
+
+def test_old_variable_still_works(monkeypatch):
+    """An existing .env must not break on the rename."""
+    from pipeline.config import load_config
+    from pipeline.llm import get_llm
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    assert get_llm(load_config(), "repo_analysis") is not None
+
+
+def test_error_names_the_new_variable(monkeypatch):
+    from pipeline.config import load_config
+    from pipeline.llm import get_llm
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="NVIDIA_API_KEY"):
+        get_llm(load_config(), "repo_analysis")
+
+
+# ------------------------------------------- uncapped tiers (NVIDIA's actual one)
+def test_zero_budget_means_uncapped_not_exhausted(cfg):
+    """`0` is a deliberate 'no cap', not an empty wallet. A falsy-check here
+    would have flipped it back into a cap - which it once did."""
+    cfg["llm"]["free_tier_credits"] = 0
+    led = credits.load(cfg)
+    assert not led.capped
+    assert not led.exhausted
+
+
+def test_uncapped_summary_reports_usage_without_a_ceiling(cfg):
+    cfg["llm"]["free_tier_credits"] = 0
+    led = credits.load(cfg)
+    for _ in range(300):
+        led.record(stage="s", run_id="r", model="m")
+    out = led.summary()
+    assert "300 calls made" in out
+    assert "remaining" not in out and "full runs" not in out
+
+
+def test_uncapped_tier_never_warns(cfg):
+    cfg["llm"]["free_tier_credits"] = 0
+    led = credits.load(cfg)
+    for _ in range(5000):
+        led.record(stage="s", run_id="r", model="m")
+    led.save()
+    assert credits.preflight_check(cfg, 138, "A full pipeline run") == ""
+
+
+def test_a_capped_provider_still_warns(cfg):
+    """Switching provider back to one that meters calls must restore the guard."""
+    cfg["llm"]["free_tier_credits"] = 100
+    led = credits.load(cfg)
+    for _ in range(95):
+        led.record(stage="s", run_id="r", model="m")
+    led.save()
+    assert "only 5 remain" in credits.preflight_check(cfg, 138, "A full pipeline run")

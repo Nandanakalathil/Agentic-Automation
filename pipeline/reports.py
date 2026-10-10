@@ -33,7 +33,7 @@ def write(run_dir: str, name: str, content: str) -> str:
     return str(p)
 
 
-_SEVERITY_ICON = {"blocker": "🛑 BLOCKER", "warning": "⚠️ WARNING", "info": "ℹ️ INFO"}
+_SEVERITY_ICON = {"blocker": "BLOCKER", "warning": "WARNING", "info": "INFO"}
 _SEVERITY_ORDER = {"blocker": 0, "warning": 1, "info": 2}
 
 # Mermaid node shapes by step kind. The model supplies ids, labels and edges;
@@ -125,15 +125,15 @@ def _alerts_banner(alerts: list[dict], risks: list[str]) -> str:
     """
     reported = []
     for a in sorted(alerts, key=lambda x: _SEVERITY_ORDER.get(x.get("severity", "warning"), 1)):
-        icon = _SEVERITY_ICON.get(a.get("severity", "warning"), "⚠️ WARNING")
+        icon = _SEVERITY_ICON.get(a.get("severity", "warning"), "WARNING")
         detail = f" — {a['detail']}" if a.get("detail") else ""
         reported.append(f"> **{icon}: {a.get('title', '')}**{detail}")
-    checked = [f"> **🛑 {r}**" for r in risks if any(r.startswith(p) for p in _MACHINE_PREFIXES)]
+    checked = [f"> **{r}**" for r in risks if any(r.startswith(p) for p in _MACHINE_PREFIXES)]
 
     if not reported and not checked:
-        return ("> ✅ **No blocking issues found.** Review the licensing and compute sections "
+        return ("> **No blocking issues found.** Review the licensing and compute sections "
                 "before deploying.\n")
-    out = "## ⚠️ Read this first\n"
+    out = "## Read this first\n"
     if checked:
         out += "\n**Verified by direct file inspection — these are facts, not judgement:**\n\n"
         out += "\n>\n".join(checked) + "\n"
@@ -263,9 +263,22 @@ def repo_analysis(state: dict, analysis: dict, agent_text: str) -> str:
         f"## Dependencies\n- Files: {', '.join(a.get('dependency_files', []))}\n"
         f"- Notable: {', '.join(a.get('notable_dependencies', []))}\n"
         f"- Python: {a.get('python_version') or '-'}; frameworks: {', '.join(a.get('frameworks', [])) or '-'}\n\n"
-        f"## Risks\n" + ("\n".join(f"- {r}" for r in a.get("risks", [])) or "- none recorded") + "\n\n"
-        f"## Analyst narrative\n{narrative(agent_text)}\n" + _json_appendix(a)
+        + _extra_risks(a.get("risks") or [], a.get("alerts") or [])
     )
+
+
+def _extra_risks(risks: list[str], alerts: list[dict]) -> str:
+    """The free-form risk list, only when there is no structured alert list.
+
+    Models fill `alerts` and `risks` with the same findings in different words,
+    so rendering both repeats every item - near-identical text that a literal
+    comparison does not catch. `alerts` is the richer of the two (severity,
+    title, detail), so when it exists the free-form list is dropped entirely.
+    """
+    if alerts:
+        return ""
+    rest = [r for r in risks if not any(r.startswith(p) for p in _MACHINE_PREFIXES)]
+    return "## Other notes\n" + "\n".join(f"- {r}" for r in rest) + "\n" if rest else ""
 
 
 def _mem(hw: dict) -> str:
