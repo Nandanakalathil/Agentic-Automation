@@ -137,6 +137,12 @@ class TestInfo(BaseModel):
     approx_count: int | None = None
     needs_gpu: bool = False
     needs_weights: bool = False
+    # A repo with no test suite may still ship a known input and its committed
+    # output. That pair is a regression check, and the only correctness evidence
+    # available before deployment - so it is worth as much as a test suite here.
+    reference_input: str = Field("", description="bundled example input file, if any")
+    reference_output: str = Field("", description="committed expected output for that input")
+    reference_note: str = Field("", description="what to compare, e.g. 'E0VIU9 top EC should be 2.3.2.31'")
 
 
 class InferenceEntrypoint(BaseModel):

@@ -4,7 +4,7 @@
 |---|---|
 | Repository | https://github.com/biomed-AI/GraphEC |
 | Run ID | `GraphEC/run2` |
-| Generated | 2026-10-10 05:30 UTC |
+| Generated | 2026-10-10 06:03 UTC |
 
 ## Read this first
 
@@ -233,6 +233,9 @@ flowchart TD
 | Commercial use | unclear |
 | Attribution required | False |
 | Notes | Code is Apache-2.0 (commercial OK). Bundled GraphEC checkpoints carry no stated licence. External dependencies (ProtT5, ESMFold weights) have their own terms. |
+
+## Tests
+**No test suite, and no reference outputs.** Correctness cannot be verified before deployment - the golden cases in the serving contract are the only check.
 
 ## Functions and classes
 | File | Name | Signature | Purpose |

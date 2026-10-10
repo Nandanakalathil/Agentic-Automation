@@ -52,6 +52,12 @@ Procedure:
    weights AND databases, rough runtime. Look at model size, dtype, batch sizes, `.cuda()`/device code,
    and any figures the README states - say where each number came from.
 9. TESTS. Find them (tests/, test_*.py, CI config) and the exact command that runs them.
+    If there is NO test suite, look for the next best thing: a bundled example input with its
+    committed output (e.g. examples/in.fasta alongside results/expected.txt). That pair is a
+    regression check - record reference_input, reference_output, and in reference_note one
+    concrete assertion you read from the file ("E0VIU9 top EC is 2.3.2.31 at 0.999"). Later
+    stages use it to prove a deployed model is correct rather than merely responding. Only say
+    there is nothing if you looked for both.
 10. FLOW. Express the repo's main pipeline as a graph of steps in `flow`: give each step a short id, a
     label, a kind (input/process/model/output/decision/external) and the ids it leads to. Start from the
     user's input and end at the final artefact. A folding repo might be:

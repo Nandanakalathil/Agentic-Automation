@@ -142,6 +142,28 @@ def _alerts_banner(alerts: list[dict], risks: list[str]) -> str:
     return out
 
 
+def _tests_block(t: dict) -> str:
+    """A table when there are tests, one useful sentence when there are not.
+
+    Rendering empty fields for a repo with no suite says nothing, and
+    "Needs GPU: False" reads as a fact about a thing that does not exist.
+    """
+    framework = (t.get("framework") or "").strip().lower()
+    if framework not in ("", "none") or t.get("command"):
+        paths = ", ".join(t.get("paths") or []) or "-"
+        return (f"| | |\n|---|---|\n| Framework | {t.get('framework')} |\n| Paths | {paths} |\n"
+                f"| Command | `{t.get('command') or '-'}` |\n| Approx. count | {t.get('approx_count') or '-'} |\n"
+                f"| Needs GPU | {t.get('needs_gpu')} |\n| Needs weights | {t.get('needs_weights')} |\n")
+    ref_in, ref_out = t.get("reference_input"), t.get("reference_output")
+    if ref_out:
+        note = f" {t['reference_note']}" if t.get("reference_note") else ""
+        return (f"**No test suite.** The repo ships a reference input/output pair "
+                f"(`{ref_in or '?'}` -> `{ref_out}`), which can serve as a regression check "
+                f"instead of a test run.{note}\n")
+    return ("**No test suite, and no reference outputs.** Correctness cannot be verified "
+            "before deployment - the golden cases in the serving contract are the only check.\n")
+
+
 def _files_table(scripts: list[dict], key_files: list[dict]) -> str:
     """Runnable entry points and the modules behind them, in one table.
 
@@ -275,9 +297,7 @@ def repo_analysis(state: dict, analysis: dict, agent_text: str) -> str:
         f"({lic.get('code_file') or '-'}) |\n| Weights | {lic.get('weights') or '-'} "
         f"({lic.get('weights_source') or '-'}) |\n| Commercial use | {lic.get('commercial_use') or 'unclear'} |\n"
         f"| Attribution required | {lic.get('attribution_required', False)} |\n| Notes | {lic.get('notes', '')} |\n\n"
-        f"## Tests\n- Framework: {t.get('framework')}\n- Paths: {', '.join(t.get('paths', []))}\n"
-        f"- Command: `{t.get('command')}`\n- Approx. count: {t.get('approx_count')}\n"
-        f"- Needs GPU: {t.get('needs_gpu')} / needs weights: {t.get('needs_weights')}\n\n"
+        f"## Tests\n{_tests_block(t)}\n"
         f"## Functions and classes\n| File | Name | Signature | Purpose |\n|---|---|---|---|\n{fns}\n\n"
         f"## Dependencies\n- Files: {', '.join(a.get('dependency_files', []))}\n"
         f"- Notable: {', '.join(a.get('notable_dependencies', []))}\n"

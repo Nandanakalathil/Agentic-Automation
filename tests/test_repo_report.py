@@ -267,3 +267,33 @@ def test_what_this_is_section_removed():
     out = render(metadata={"details": "a unique sentence about the model"})
     assert "## What this is" not in out
     assert out.count("a unique sentence about the model") == 1
+
+
+# ---------------------------------------------------------------- tests block
+def test_no_suite_and_no_reference_says_what_that_means():
+    out = render(tests={"framework": "none"})
+    assert "No test suite, and no reference outputs" in out
+    assert "Needs GPU" not in out          # a fact about a thing that does not exist
+
+
+def test_reference_pair_is_offered_instead():
+    out = render(tests={"framework": "none",
+                        "reference_input": "Data/fasta/EC_number.fasta",
+                        "reference_output": "EC_number/results/example_top5.txt",
+                        "reference_note": "E0VIU9 top EC is 2.3.2.31 at 0.999."})
+    assert "regression check" in out
+    assert "EC_number/results/example_top5.txt" in out
+    assert "2.3.2.31" in out
+
+
+def test_real_suite_still_renders_the_table():
+    out = render(tests={"framework": "pytest", "command": "pytest -q",
+                        "paths": ["tests"], "approx_count": 24, "needs_gpu": True})
+    assert "| Framework | pytest |" in out
+    assert "`pytest -q`" in out
+    assert "No test suite" not in out
+
+
+def test_a_command_without_a_named_framework_still_counts_as_tests():
+    out = render(tests={"framework": "", "command": "make test"})
+    assert "`make test`" in out and "No test suite" not in out
