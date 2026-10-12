@@ -13,8 +13,8 @@ class PipelineState(TypedDict, total=False):
     run_id: str
     repo_url: str
     repo_ref: str | None
-    run_dir: str          # runs/<run_id>
-    workspace: str        # runs/<run_id>/repo (local clone the agents edit)
+    run_dir: str          # outputs/<repo>/agent<n>/run<k>
+    workspace: str        # <run_dir>/repo (local clone the agents edit)
 
     # Stage 1: repo analysis
     analysis: dict[str, Any]

@@ -98,7 +98,7 @@ def _drive(app, run_id: str, inp, interactive: bool) -> int:
             return 1
         interrupts = result.get("__interrupt__") or []
         if not interrupts:
-            print(f"\nRun {run_id}: {result.get('status')}. Reports in runs/{run_id}/")
+            print(f"\nRun {run_id}: {result.get('status')}. Reports in outputs/{run_id}/")
             _report_credits(run_id)
             return 0 if result.get("status") == "completed" else 2
         payload = interrupts[0].value

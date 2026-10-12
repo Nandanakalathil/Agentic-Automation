@@ -7,15 +7,16 @@ aws_credentials_backup.txt
 # Keep the generated reports; drop everything else a run leaves behind. The
 # clone under repo/ is someone else's source tree, and .state/ holds agent
 # transcripts (which quote that source), the checkpoint db and the ledger.
-runs/**
-!runs/**/
-!runs/**/*.md
+# Layout: outputs/<repo>/agent<n>/run<k>/
+outputs/**
+!outputs/**/
+!outputs/**/*.md
 # The clone has its own .git, so naming only its contents makes git add it as a
 # submodule gitlink instead. The directory itself has to be excluded.
-runs/**/repo
-runs/**/repo/**
-runs/**/.state
-runs/**/.state/**
+outputs/**/repo
+outputs/**/repo/**
+outputs/**/.state
+outputs/**/.state/**
 
 # --- environments and caches -------------------------------------------
 .venv/

@@ -108,4 +108,4 @@ aws:
       requests: 200
 
 schema_path: schema/endpoint_schema.json
-runs_dir: runs
+runs_dir: outputs

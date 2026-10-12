@@ -42,6 +42,47 @@ AGENTS: dict[str, tuple[str, list[str], bool]] = {
 
 FREE = [n for n, (_, _, needs_ec2) in AGENTS.items() if not needs_ec2]
 
+# Position in the pipeline, 0-indexed, used for the output path. Kept explicit
+# rather than derived from AGENTS order so renaming or reordering an agent does
+# not silently move everyone's output directory.
+AGENT_NUMBER: dict[str, int] = {
+    "repo_analyst": 0,
+    "ec2_planner": 1,
+    "test_fixer": 2,
+    "sagemaker_planner": 3,
+    "adapter_builder": 4,
+}
+
+
+def repo_slug(repo_url: str) -> str:
+    """'https://github.com/biomed-AI/GraphEC.git' -> 'GraphEC'.
+
+    Case is preserved: the directory should read like the project it holds.
+    """
+    name = repo_url.rstrip("/").split("/")[-1].removesuffix(".git")
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-") or "repo"
+
+
+def output_dir(cfg: Config, agent: str, repo_url: str, run: str) -> Path:
+    """outputs/<repo>/agent<n>/<run> - one repo's history in one place."""
+    return cfg.runs_dir / repo_slug(repo_url) / f"agent{AGENT_NUMBER[agent]}" / run
+
+
+def next_run_name(parent: Path) -> str:
+    """'run1', 'run2', ... one past the highest that exists.
+
+    Deliberately not the first free number: filling a gap would put a new run
+    before older ones in a listing, and the whole point of the sequence is that
+    it reads in the order the runs happened.
+    """
+    highest = 0
+    if parent.exists():
+        for p in parent.glob("run*"):
+            m = re.fullmatch(r"run(\d+)", p.name)
+            if m:
+                highest = max(highest, int(m.group(1)))
+    return f"run{highest + 1}"
+
 
 def _load_state(run_dir: Path) -> PipelineState:
     """Rebuild state from a previous run's artefacts.
@@ -64,10 +105,16 @@ def _load_state(run_dir: Path) -> PipelineState:
     return state  # type: ignore[return-value]
 
 
-def _new_run_dir(cfg: Config, repo_url: str, suffix: str) -> tuple[str, Path]:
-    slug = re.sub(r"[^a-zA-Z0-9]+", "-", repo_url.rstrip("/").split("/")[-1].removesuffix(".git")).strip("-").lower()
-    run_id = f"{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-{slug[:24]}-{suffix}"
-    return run_id, cfg.runs_dir / run_id
+def _new_run_dir(cfg: Config, repo_url: str, agent: str) -> tuple[str, Path]:
+    """Allocate outputs/<repo>/agent<n>/run<k> for a fresh run.
+
+    Named by position rather than timestamp: the point of the layout is that
+    one repo's runs sit together in order and can be diffed against each other.
+    """
+    parent = cfg.runs_dir / repo_slug(repo_url) / f"agent{AGENT_NUMBER[agent]}"
+    run = next_run_name(parent)
+    run_dir = parent / run
+    return str(run_dir.relative_to(cfg.runs_dir)), run_dir
 
 
 def run_agent_standalone(cfg: Config, agent: str, *, repo_url: str | None = None,
@@ -92,11 +139,14 @@ def run_agent_standalone(cfg: Config, agent: str, *, repo_url: str | None = None
         if not repo_url:
             raise ValueError("pass --repo <url> (to start fresh) or --from-run <run_id>")
         if run_id:
-            # A caller-chosen id may be nested ("GraphEC/run2") so repeated runs on
-            # one repo sit together and can be diffed.
-            run_dir = cfg.runs_dir / run_id
             if any(part in ("..", "") for part in Path(run_id).parts):
                 raise ValueError(f"invalid --run-id {run_id!r}")
+            # A bare name ("run3") is placed under this repo's agent directory;
+            # a path ("GraphEC/agent0/run3") is taken as given, so an existing
+            # run can still be targeted exactly.
+            run_dir = (output_dir(cfg, agent, repo_url, run_id) if len(Path(run_id).parts) == 1
+                       else cfg.runs_dir / run_id)
+            run_id = str(run_dir.relative_to(cfg.runs_dir))
         else:
             run_id, run_dir = _new_run_dir(cfg, repo_url, agent)
         state = {"run_id": run_id, "repo_url": repo_url, "repo_ref": repo_ref, "run_dir": str(run_dir)}
