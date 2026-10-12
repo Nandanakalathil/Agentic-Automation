@@ -322,3 +322,60 @@ def test_python_source_is_not_mistaken_for_a_binary(repo: Path):
     script.chmod(0o755)
     pf = preflight.scan(repo)
     assert pf.bundled_binaries == []
+
+
+# --- shorthand vs hallucination ---------------------------------------------
+# "fold0-4.ckpt" names five real files. Reporting it as a hallucination put
+# "treat the analysis as unreliable" on top of a sound report, which trains the
+# reader to ignore the banner that matters.
+
+@pytest.fixture
+def ckpt_repo(repo: Path) -> Path:
+    """The standard repo, plus a five-fold checkpoint directory."""
+    model = repo / "model"
+    model.mkdir()
+    for i in range(5):
+        (model / f"fold{i}.ckpt").write_text("w")
+    return repo
+
+
+@pytest.mark.parametrize("cited", ["model/fold0-4.ckpt", "model/fold{0..4}.ckpt"])
+def test_range_shorthand_is_not_a_hallucination(ckpt_repo: Path, cited: str):
+    a = good_analysis()
+    a["assets"] = [{"path": cited, "kind": "weights", "bundled": True}]
+    assert missing_names(verify.missing_paths(a, ckpt_repo)) == []
+    assert missing_names(verify.shorthand_paths(a, ckpt_repo)) == [cited]
+
+
+def test_shorthand_is_reported_but_not_as_unreliable(ckpt_repo: Path):
+    a = good_analysis()
+    a["assets"] = [{"path": "model/fold0-4.ckpt", "kind": "weights", "bundled": True}]
+    risks = verify.review(a, preflight.scan(ckpt_repo), ckpt_repo, hit_step_limit=False)
+    assert any(r.startswith("IMPRECISE PATH") for r in risks)
+    assert not any("HALLUCINATED" in r for r in risks)
+
+
+def test_shorthand_in_a_directory_that_does_not_exist_is_still_a_hallucination(ckpt_repo: Path):
+    a = good_analysis()
+    a["assets"] = [{"path": "nope/fold0-4.ckpt", "kind": "weights", "bundled": True}]
+    assert missing_names(verify.missing_paths(a, ckpt_repo)) == ["nope/fold0-4.ckpt"]
+    assert verify.shorthand_paths(a, ckpt_repo) == []
+
+
+def test_a_genuinely_invented_file_is_still_caught(ckpt_repo: Path):
+    a = good_analysis()
+    a["assets"] = [{"path": "model/imaginary.ckpt", "kind": "weights", "bundled": True}]
+    assert missing_names(verify.missing_paths(a, ckpt_repo)) == ["model/imaginary.ckpt"]
+
+
+def missing_names(pairs):
+    return [p for _field, p in pairs]
+
+
+def test_angle_bracket_placeholders_are_ignored_entirely(ckpt_repo: Path):
+    """`<ID>.ckpt` is filtered before the existence check, so it is neither a
+    hallucination nor a shorthand finding - it is simply not a path claim."""
+    a = good_analysis()
+    a["assets"] = [{"path": "model/<ID>.ckpt", "kind": "weights", "bundled": True}]
+    assert verify.missing_paths(a, ckpt_repo) == []
+    assert verify.shorthand_paths(a, ckpt_repo) == []

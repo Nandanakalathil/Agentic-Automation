@@ -188,3 +188,47 @@ def test_a_capped_provider_still_warns(cfg):
         led.record(stage="s", run_id="r", model="m")
     led.save()
     assert "only 5 remain" in credits.preflight_check(cfg, 138, "A full pipeline run")
+
+
+# --- usage extraction across response shapes --------------------------------
+# Streaming moved the token counts; reading only the old location recorded
+# every streamed call as free while the ledger still looked healthy.
+
+class _Msg:
+    def __init__(self, usage=None, rmeta=None):
+        self.usage_metadata = usage
+        self.response_metadata = rmeta or {}
+
+
+class _Gen:
+    def __init__(self, message):
+        self.message = message
+
+
+class _Result:
+    def __init__(self, llm_output=None, generations=None):
+        self.llm_output = llm_output
+        self.generations = generations or []
+
+
+def test_usage_from_unstreamed_llm_output():
+    r = _Result(llm_output={"token_usage": {"prompt_tokens": 120, "completion_tokens": 7}})
+    assert credits._usage(r) == (120, 7)
+
+
+def test_usage_from_streamed_message_metadata():
+    r = _Result(llm_output={},
+                generations=[[_Gen(_Msg(usage={"input_tokens": 45_000, "output_tokens": 8_100}))]])
+    assert credits._usage(r) == (45_000, 8_100)
+
+
+def test_usage_from_response_metadata_fallback():
+    r = _Result(llm_output=None,
+                generations=[[_Gen(_Msg(rmeta={"token_usage": {"prompt_tokens": 10,
+                                                               "completion_tokens": 2}}))]])
+    assert credits._usage(r) == (10, 2)
+
+
+def test_usage_absent_is_zero_not_an_error():
+    assert credits._usage(_Result()) == (0, 0)
+    assert credits._usage(_Result(llm_output={}, generations=[[_Gen(_Msg())]])) == (0, 0)

@@ -77,6 +77,9 @@ Procedure:
     user's input and end at the final artefact. A folding repo might be:
     input_fasta -> msa_search(external) -> features -> model -> relax -> output_pdb.
     Supply the steps only - the diagram is drawn from them. Do NOT write diagram syntax.
+    For a decision step, label each branch by writing the target as "id:label", e.g. a
+    "features cached?" step with next ["build_graph:yes", "extract_features:no"]. Unlabelled
+    arrows out of a decision leave the reader guessing which way is which.
 11. QUICKSTART. The shortest honest path from a clean machine to one real prediction: install commands
     in order, how to obtain the weights, and ONE run command that uses an example input that genuinely
     exists in the repo (prefer a file you saw under examples/ or tests/). Say what success looks like, so
@@ -105,14 +108,24 @@ Procedure:
     severity: "crash" fails loudly, "wrong_output" succeeds with wrong data (the dangerous one),
     "performance" is slow, "dormant" is latent behind dead code. Set confirmed=true ONLY for what you
     read directly.
-15. BOTTLENECKS. What will make this slow or expensive in production, as opposed to broken:
+15. SUPPLY CHAIN AND EXPOSURE. This repo will be installed on a machine you do not own and may be
+    fed inputs from outside. Record as alerts, with file:line: values that reach a shell unescaped
+    (os.system / subprocess with shell=True built by string formatting - say which part is caller-
+    controlled, usually a filename rather than file contents); prebuilt binaries committed without
+    checksums or a build recipe; `pip install` from a git URL or an unpinned index; code that
+    downloads and executes at runtime; credentials or absolute paths from the author's machine left
+    in source. Do NOT report a finding as a vulnerability unless you can name the path by which
+    untrusted input reaches it - say what you saw and what would have to be true for it to bite.
+16. BOTTLENECKS. What will make this slow or expensive in production, as opposed to broken:
     hardcoded batch_size=1, work repeated per-request that could be cached, full-dataset scans on
     every call, subprocess spawns per item, models reloaded instead of held. Cite file:line.
 
 Rules:
 - Be efficient: do not read every file; use search and find_files to target. Never guess file contents.
 - Every path you name must be one you actually saw in a tool result. An invented path is checked and
-  will be reported as a hallucination.
+  will be reported as a hallucination. Write real filenames, never ranges or placeholders: a later
+  agent pastes these into commands, and `cp model/fold0-4.ckpt` fails where `model/` or
+  `model/fold0.ckpt` works.
 - Distinguish what the repo SAYS from what you VERIFIED. If the README claims 16 GB VRAM and you did not
   confirm it, say the README claims it.
 - Use null/empty for what you could not establish. An honest gap is useful; a confident guess is not.

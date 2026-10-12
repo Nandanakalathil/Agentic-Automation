@@ -368,3 +368,14 @@ def test_call_path_shows_edges():
         "")
     assert "Inference call path" in md
     assert "`main.py:64`" in md and "GraphEC.forward" in md
+
+
+def test_every_finding_prefix_reaches_the_banner():
+    """A finding verify can emit but reports does not recognise is dropped
+    silently. That happened once with IMPRECISE PATH; this keeps the two lists
+    honest with each other."""
+    emitted = ("LICENCE BLOCKER", "ANALYSIS INCOMPLETE", "HALLUCINATED PATH",
+               "CONTRADICTS SCAN", "BROKEN SCRIPT", "IMPRECISE PATH")
+    for prefix in emitted:
+        banner = reports._alerts_banner([], [f"{prefix}: something happened"])
+        assert prefix in banner, f"{prefix} is emitted by verify but dropped by the banner"

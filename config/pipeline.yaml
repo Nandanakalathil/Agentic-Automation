@@ -24,8 +24,21 @@ llm:
   free_tier_credits: 1000
   warn_at_remaining: 150
   temperature: 0.1
-  max_output_tokens: 8192
-  request_timeout_s: 300
+  # kimi-k3 spends output budget on reasoning tokens before it emits anything
+  # (a probe answering "ok" burned 27 of 38 tokens thinking). The orientation
+  # document is now ~8k tokens of JSON on its own, so an 8192 ceiling risks
+  # truncating it mid-object and handing the repair loop a broken document.
+  max_output_tokens: 16384
+  # Streaming is not cosmetic here. Unstreamed, the timeout covers the WHOLE
+  # response, so a long structured answer on a slow free endpoint trips it even
+  # while the model is making progress - which is exactly how the GraphEC run3
+  # analysis died after 9 successful steps. Streamed, the clock is per chunk.
+  stream: true
+  request_timeout_s: 600
+  # One retry, not three. A timeout here means the endpoint is slow, and three
+  # more identical 10-minute attempts just turn a visible failure into a
+  # 40-minute silence.
+  max_retries: 1
   # OpenRouter-only routing field. MUST stay null on NVIDIA/Gemini/etc - other
   # backends reject the unknown "provider" key in the request body (llm.py:26).
   provider_preferences: null

@@ -79,9 +79,13 @@ def flow_diagram(flow: list[dict]) -> str:
         kind = step.get("kind") if step.get("kind") in _FLOW_SHAPE else "process"
         lines.append("    " + _FLOW_SHAPE[kind].format(id=sid, label=_mm_label(step.get("label", sid))))
         for nxt in step.get("next") or []:
-            target = _mm_id(nxt)
+            # "cached:yes" labels the branch; a decision node whose arrows are
+            # unlabelled leaves the reader guessing which way is which.
+            raw, _, label = str(nxt).partition(":")
+            target = _mm_id(raw)
             if target in known:  # a dangling edge breaks the render; drop it
-                edges.append(f"    {sid} --> {target}")
+                arrow = f"-- {_mm_label(label.strip())} -->" if label.strip() else "-->"
+                edges.append(f"    {sid} {arrow} {target}")
     return "```mermaid\nflowchart TD\n" + "\n".join(lines + edges) + "\n" + _FLOW_STYLES + "```"
 
 
@@ -90,8 +94,11 @@ def structure_block(tree: list[str]) -> str:
     return "```\n" + "\n".join(tree) + "\n```" if tree else "_(not scanned)_"
 
 
+# Must list every prefix verify.review can emit: a finding whose prefix is
+# missing here is dropped from the banner without a trace, which is how a new
+# check can appear to pass while reporting nothing.
 _MACHINE_PREFIXES = ("LICENCE", "ANALYSIS INCOMPLETE", "HALLUCINATED PATH", "CONTRADICTS SCAN",
-                     "BROKEN SCRIPT")
+                     "BROKEN SCRIPT", "IMPRECISE PATH")
 
 
 def _quickstart_block(q: dict) -> str:
@@ -206,6 +213,15 @@ def _code(v) -> str:
     return f"`{s[:80]}`" if s else "-"
 
 
+def _io_label(spec: dict) -> str:
+    """'example_top5.txt (text)' - the artefact, with its format as context."""
+    name = str(spec.get("name") or "").strip()
+    fmt = str(spec.get("format") or "").strip()
+    if name and fmt and fmt.lower() not in name.lower():
+        return f"{name} ({fmt})"
+    return name or fmt
+
+
 def _bugs_block(bugs: list[dict]) -> str:
     """Defects ordered by how badly they fail, not by discovery order.
 
@@ -284,10 +300,12 @@ def repo_analysis(state: dict, analysis: dict, agent_text: str) -> str:
                                                else _bundled_size(pf))),
         ("Peak memory", _mem(hw)),
         ("Compute", _compute(hw)),
-        # Required inputs only: an optional knob is not part of "what this model takes".
-        ("Input", ", ".join(i.get("format") or i.get("name", "") for i in a.get("inputs") or []
+        # Name first, format second. Four outputs rendered as "text, text, text,
+        # text" is a row that costs a line and tells the reader nothing; the
+        # artefact names are what distinguish them.
+        ("Input", ", ".join(_io_label(i) for i in a.get("inputs") or []
                             if i.get("required", True)) or inf.get("input_format") or "-"),
-        ("Output", ", ".join(o.get("format") or o.get("name", "") for o in a.get("outputs") or []) or
+        ("Output", ", ".join(_io_label(o) for o in a.get("outputs") or []) or
                    inf.get("output_format") or "-"),
         ("Publication", m.get("publication") or "-"),
         ("Paper / preprint", link_cell("arxiv", "biorxiv", "doi", "paper", "nature")),

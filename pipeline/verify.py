@@ -57,17 +57,49 @@ def _cited_paths(analysis: dict) -> list[tuple[str, str]]:
     return out
 
 
+# "fold0-4.ckpt" means five real files; "{0..4}" and "<ID>.txt" are the same
+# habit. These are imprecise, not invented, and calling them hallucinations
+# puts "treat the analysis as unreliable" on top of an otherwise sound report -
+# which teaches the reader to skip the banner that matters.
+_SHORTHAND = re.compile(r"\d+\s*-\s*\d+|\{.*\}|<[^>]+>|\bN\b")
+
+
+def _is_shorthand(path: str, workspace: Path) -> bool:
+    """True when a path is a range/placeholder whose directory really exists."""
+    if not _SHORTHAND.search(Path(path).name):
+        return False
+    parent = workspace / Path(path).parent
+    return parent.is_dir() and any(parent.iterdir())
+
+
 def missing_paths(analysis: dict, workspace: Path) -> list[tuple[str, str]]:
-    """Cited paths that do not exist in the cloned repo, deduplicated."""
+    """Cited paths that do not exist in the cloned repo, deduplicated.
+
+    Range shorthand is excluded here and reported separately by `shorthand_paths`.
+    """
     seen: set[str] = set()
     missing: list[tuple[str, str]] = []
     for field, p in _cited_paths(analysis):
         if p in seen:
             continue
         seen.add(p)
-        if not (workspace / p).exists():
+        if not (workspace / p).exists() and not _is_shorthand(p, workspace):
             missing.append((field, p))
     return missing
+
+
+def shorthand_paths(analysis: dict, workspace: Path) -> list[tuple[str, str]]:
+    """Cited paths that stand for several real files. Downstream agents copy
+    these strings into commands, so `cp fold0-4.ckpt` would fail."""
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+    for field, p in _cited_paths(analysis):
+        if p in seen:
+            continue
+        seen.add(p)
+        if not (workspace / p).exists() and _is_shorthand(p, workspace):
+            out.append((field, p))
+    return out
 
 
 def completeness_gaps(analysis: dict) -> list[str]:
@@ -208,6 +240,13 @@ def review(analysis: dict, pf: Any, workspace: Path, *, hit_step_limit: bool) ->
         more = f" and {len(missing) - 8} more" if len(missing) > 8 else ""
         risks.append(f"HALLUCINATED PATH: {len(missing)} cited file(s) do not exist in the repo: {shown}{more}. "
                      "Treat the analysis as unreliable.")
+
+    shorthand = shorthand_paths(analysis, workspace)
+    if shorthand:
+        shown = ", ".join(p for _f, p in shorthand[:6])
+        risks.append(f"IMPRECISE PATH: {len(shorthand)} path(s) are written as a range or placeholder "
+                     f"rather than a real filename: {shown}. The files exist; expand the name before "
+                     "putting it in a command.")
 
     broken = getattr(pf, "broken_scripts", None) or []
     if broken:

@@ -164,6 +164,36 @@ def load(cfg) -> Ledger:
     return Ledger.load(ledger_path(cfg), int(budget) if budget is not None else 0)
 
 
+def _usage(response: Any) -> tuple[int, int]:
+    """(input_tokens, output_tokens) from an LLMResult, streamed or not.
+
+    A streamed response carries no `llm_output["token_usage"]` - the figures
+    arrive on the final chunk and land on the message's `usage_metadata`
+    instead. Reading only the first place silently records every streamed call
+    as costing nothing, which is worse than not metering at all: the ledger
+    looks healthy while the real usage is unknown.
+    """
+    llm_out = getattr(response, "llm_output", None) or {}
+    usage = llm_out.get("token_usage") or llm_out.get("usage") or {}
+    in_tok = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+    out_tok = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+    if in_tok or out_tok:
+        return in_tok, out_tok
+
+    for gen_list in getattr(response, "generations", None) or []:
+        for gen in gen_list or []:
+            msg = getattr(gen, "message", None)
+            meta = getattr(msg, "usage_metadata", None) or {}
+            if meta:
+                return int(meta.get("input_tokens") or 0), int(meta.get("output_tokens") or 0)
+            # Older shapes keep it under response_metadata.token_usage.
+            rmeta = (getattr(msg, "response_metadata", None) or {}).get("token_usage") or {}
+            if rmeta:
+                return (int(rmeta.get("prompt_tokens") or 0),
+                        int(rmeta.get("completion_tokens") or 0))
+    return 0, 0
+
+
 class CreditTracker(BaseCallbackHandler):
     """Counts one credit per completed model call, straight from LangChain.
 
@@ -177,9 +207,7 @@ class CreditTracker(BaseCallbackHandler):
 
     def on_llm_end(self, response: Any, **_kw: Any) -> None:
         try:
-            usage = (getattr(response, "llm_output", None) or {}).get("token_usage") or {}
-            in_tok = int(usage.get("prompt_tokens") or 0)
-            out_tok = int(usage.get("completion_tokens") or 0)
+            in_tok, out_tok = _usage(response)
             with _LOCK:
                 led = load(self.cfg)
                 led.record(stage=self.stage, run_id=self.run_id, model=self.model,

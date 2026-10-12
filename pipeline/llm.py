@@ -34,8 +34,12 @@ def get_llm(cfg: Config, stage: str, run_id: str = "") -> ChatOpenAI:
         api_key=api_key,
         base_url=llm_cfg["base_url"],
         temperature=llm_cfg.get("temperature", 0.1),
-        timeout=llm_cfg.get("request_timeout_s", 300),
-        max_retries=3,
+        timeout=llm_cfg.get("request_timeout_s", 600),
+        max_retries=llm_cfg.get("max_retries", 1),
+        streaming=llm_cfg.get("stream", True),
+        # Streaming otherwise drops the usage block, and the credit ledger would
+        # silently record every call as costing nothing.
+        stream_usage=True,
         extra_body=extra_body,
         default_headers={"X-Title": "model-deploy-pipeline"},
         # Attached here, not in the nodes, so every call is counted - including the
