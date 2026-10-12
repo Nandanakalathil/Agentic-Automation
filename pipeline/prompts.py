@@ -45,12 +45,26 @@ Procedure:
    whether required, constraints (max length, single chain, batch limits) and a realistic example value.
    Do the same for outputs, including confidence or score fields. Read the pre/post-processing to get
    this right; do not infer it from argument names.
+   Inputs are what a CALLER SENDS, not what the CLI accepts. `--gpu`, `--device`, `--seed`,
+   `--batch-size`, `--output-dir` are execution settings: they belong in the entrypoint's invocation,
+   never in `inputs`, or the serving schema built later will ask an API client for a GPU index.
+   Name each output after the artefact ("example_top5.txt", "per_residue_scores"), not after its type -
+   four outputs all named "text" tell a reader nothing.
 7. SCRIPTS AND ASSETS. Catalogue runnable scripts with their exact invocation, and the assets present:
    weights, configs, example inputs, notebooks, Dockerfiles. Mark assets that must be downloaded rather
    than being in the repo.
 8. RESOURCES. GPU required or merely faster? Minimum VRAM, peak memory at inference, disk needed for
    weights AND databases, rough runtime. Look at model size, dtype, batch sizes, `.cuda()`/device code,
    and any figures the README states - say where each number came from.
+   You will usually find no stated VRAM figure. Do NOT leave it empty: an empty field stops the next
+   agent from choosing an instance, which is the single decision this document exists to enable.
+   Reason to a number and label it. Parameter count x bytes per dtype is a floor (a 3B-param fp32
+   encoder is ~12 GB of weights before activations); add the largest upstream model in the pipeline,
+   note whether stages run sequentially or stay resident together, and put the arithmetic in
+   peak_memory_basis so the reader can disagree with it. "~24 GB, estimated: ESMFold + ProtT5-XL fp32
+   resident together, not measured" is useful. An empty field is not.
+   Record external_download_gb separately for weights fetched at runtime - they are not in disk_gb but
+   they do need volume. If the established facts list prebuilt binaries, set platform_constraint.
 9. TESTS. Find them (tests/, test_*.py, CI config) and the exact command that runs them.
     If there is NO test suite, look for the next best thing: a bundled example input with its
     committed output (e.g. examples/in.fasta alongside results/expected.txt). That pair is a
@@ -75,6 +89,25 @@ Procedure:
     that prevent use or deployment, "warning" for things that will cost time, "info" for the rest.
     Scripts that fail to parse are listed for you in the established facts - do not re-derive them, but
     DO explain the consequence (is it a dead example, or the main entrypoint?).
+13. VERSION PINS. Fill `version_pins` with every package version you can establish. Dependency files
+    give confirmed=true. The README prose pins are listed in the established facts already: copy them
+    across with their source and confirmed=false rather than re-reading the README. Then add the
+    imports you saw that are pinned NOWHERE - those are the ones that break a build six months later,
+    and they are invisible unless you list them with an empty version.
+14. KNOWN BUGS. While reading the inference path you will see code that cannot work. Record each in
+    `known_bugs` with: what it is, the `file:line` you read it at, and - this is the part that matters -
+    the TRIGGER, the condition under which it actually fires. "Crashes whenever --gpu is omitted,
+    because argparse default is None" is actionable; "the GPU handling is fragile" is not.
+    Look specifically for: absolute paths from someone else's machine; type errors on a path that is
+    never exercised by the bundled example ('cuda:' + int); files read but never written by any code
+    path; argparse defaults that are passed straight into a call that rejects them; case-mismatched
+    filenames that only break on a case-sensitive filesystem; unchecked `os.system` return codes.
+    severity: "crash" fails loudly, "wrong_output" succeeds with wrong data (the dangerous one),
+    "performance" is slow, "dormant" is latent behind dead code. Set confirmed=true ONLY for what you
+    read directly.
+15. BOTTLENECKS. What will make this slow or expensive in production, as opposed to broken:
+    hardcoded batch_size=1, work repeated per-request that could be cached, full-dataset scans on
+    every call, subprocess spawns per item, models reloaded instead of held. Cite file:line.
 
 Rules:
 - Be efficient: do not read every file; use search and find_files to target. Never guess file contents.
@@ -83,6 +116,17 @@ Rules:
 - Distinguish what the repo SAYS from what you VERIFIED. If the README claims 16 GB VRAM and you did not
   confirm it, say the README claims it.
 - Use null/empty for what you could not establish. An honest gap is useful; a confident guess is not.
+  The one exception is peak memory under step 8: there, a labelled estimate beats a blank.
+- Cite as you go. Every function in `functions` takes an `evidence` of `file:line`, and so does every
+  entry in `known_bugs` and `bottlenecks`. A claim the next agent cannot check, it must either take on
+  faith or work out again from scratch - both are worse than you spending four characters on a line
+  number you already read.
+- For `functions`, record the call graph, not a glossary: fill `called_by` and `calls` so the inference
+  path can be followed end to end from the entrypoint. Cover the inference path completely; skip
+  training, plotting and evaluation code entirely.
+- Say things once. The document is assembled from your fields, and a fact you repeat in `summary`,
+  `risks` and `alerts` is printed three times. Put each finding in the one field that fits it:
+  operator-facing dangers in `alerts`, runtime defects in `known_bugs`, speed in `bottlenecks`.
 """
 
 EC2_PLANNER = """You are an MLOps engineer planning an EC2 deployment that installs a model repository,

@@ -109,6 +109,48 @@ class FunctionInfo(BaseModel):
     name: str
     signature: str = ""
     purpose: str = ""
+    # A downstream agent building a serving adapter needs the call graph, not a
+    # glossary: what invokes this, and what it invokes in turn.
+    called_by: str = Field("", description="what calls this, e.g. 'extract_features (main.py:70)'")
+    calls: str = Field("", description="what this calls, e.g. 'get_pdb_xyz, esmfold.py (subprocess)'")
+    evidence: str = Field("", description="file:line where it is defined, e.g. 'main.py:12'")
+
+
+class VersionPin(BaseModel):
+    """One package version the repo depends on, and how firmly it is stated.
+
+    A pin quoted from README prose and a pin read from requirements.txt are not
+    the same fact, and the EC2 planner must treat them differently.
+    """
+
+    package: str
+    version: str = Field("", description="empty when the dependency is named with no version")
+    source: str = Field("", description="file:line the pin was read from, e.g. 'README.md:7'")
+    confirmed: bool = Field(False, description="True from a dependency file, False from prose")
+    note: str = ""
+
+
+class KnownBug(BaseModel):
+    """A defect that will fire at runtime, with the condition that triggers it.
+
+    'Known bugs' without trigger conditions are not actionable: the planner has
+    to know whether something breaks every run or only an unusual one.
+    """
+
+    title: str
+    detail: str = ""
+    evidence: str = Field("", description="file:line, e.g. 'Features/features.py:45'")
+    trigger: str = Field("", description="exactly when it fires, e.g. 'any GPU-enabled invocation'")
+    severity: Literal["crash", "wrong_output", "performance", "dormant"] = "crash"
+    confirmed: bool = Field(False, description="True only if verified by reading or running the code")
+
+
+class Bottleneck(BaseModel):
+    """Something that makes the pipeline slow or expensive, not something broken."""
+
+    title: str
+    detail: str = ""
+    evidence: str = ""
 
 
 class Weights(BaseModel):
@@ -126,6 +168,10 @@ class Hardware(BaseModel):
     peak_memory_basis: str = Field("", description="where that figure comes from: README, code, issue, estimate")
     min_ram_gb: float | None = None
     disk_gb: float | None = Field(None, description="weights plus any databases the model needs on disk")
+    external_download_gb: float | None = Field(
+        None, description="weights fetched at runtime, NOT counted in disk_gb - size the volume for both")
+    platform_constraint: str = Field(
+        "", description="hard OS/arch requirement and its proof, e.g. 'Linux x86-64: bundled ELF mkdssp'")
     approx_runtime: str = Field("", description="e.g. '~3 min for a 300-residue protein on an A10G'")
     notes: str = ""
 
@@ -179,6 +225,13 @@ class RepoAnalysis(BaseModel):
     outputs: list[IOSpec] = Field([], description="outputs of the main inference path")
     flow: list[FlowStep] = Field([], description="process flow of the repo's main pipeline, as a graph")
     alerts: list[Alert] = Field([], description="what an operator must know before using this repo")
+    # --- what the EC2 planner needs and a prose summary cannot carry ---------
+    version_pins: list[VersionPin] = Field(
+        [], description="every package version, from dependency files AND README prose")
+    known_bugs: list[KnownBug] = Field(
+        [], description="defects that fire at runtime, each with its trigger condition")
+    bottlenecks: list[Bottleneck] = Field(
+        [], description="what makes it slow or expensive: no batching, repeated work, shell-outs")
 
 
 # ------------------------------------------------------------------ EC2

@@ -96,7 +96,36 @@ def completeness_gaps(analysis: dict) -> list[str]:
         gaps.append("no stated purpose for the model")
     if not (analysis.get("licensing") or {}).get("weights"):
         gaps.append("weights licence not established - serving may not be permitted")
+    if hw.get("gpu_required") and not hw.get("peak_memory_gb"):
+        gaps.append("no peak memory estimate - the planner cannot size the instance; "
+                    "an estimate with its basis was asked for, not a blank")
+    if not analysis.get("functions"):
+        gaps.append("no call path recorded - the adapter builder cannot follow the inference chain")
     return gaps
+
+
+# Flags that configure a run rather than feed the model. If one of these is
+# listed as a model input, it ends up in the serving schema, and an API client
+# is asked to supply a GPU index.
+_EXECUTION_FLAGS = {
+    "gpu", "gpus", "device", "cuda", "seed", "batch_size", "batchsize", "num_workers",
+    "output_dir", "outdir", "out", "verbose", "debug", "cpu", "threads", "n_jobs",
+}
+
+
+def _io_problems(analysis: dict) -> list[str]:
+    out: list[str] = []
+    for spec in analysis.get("inputs") or []:
+        name = str(spec.get("name", "")).strip().lower().lstrip("-").replace("-", "_")
+        if name in _EXECUTION_FLAGS:
+            out.append(f"'{name}' is listed as a model input, but it is an execution flag - "
+                       "it would end up in the serving schema")
+    outputs = [str(o.get("name", "")).strip().lower() for o in analysis.get("outputs") or []]
+    formats = {"text", "txt", "json", "csv", "file", "string", "tensor", "binary"}
+    if len(outputs) > 1 and all(o in formats for o in outputs):
+        out.append("outputs are named by format rather than by artefact - "
+                   "a reader cannot tell the results apart")
+    return out
 
 
 # Licence names vary in punctuation, version and the word "licence": Apache-2.0,
@@ -146,6 +175,18 @@ def contradictions(analysis: dict, pf: Any) -> list[str]:
     if getattr(pf, "notebooks", None) and not any(
             (s.get("kind") == "notebook") for s in analysis.get("scripts") or []):
         out.append(f"scan found {len(pf.notebooks)} notebook(s) that the analysis does not mention")
+    # The scan read these out of the README; an analysis that records none has
+    # not looked at the one place this repo states its environment.
+    if getattr(pf, "readme_pins", None) and not analysis.get("version_pins"):
+        src = pf.readme_pins[0].get("source", "the README")
+        out.append(f"scan read {len(pf.readme_pins)} version pin(s) from {src} "
+                   "that the analysis did not record")
+    bins = getattr(pf, "bundled_binaries", None) or []
+    if bins and not (analysis.get("hardware") or {}).get("platform_constraint"):
+        out.append(f"scan found {len(bins)} prebuilt binary/-ies ({bins[0]['path']} is "
+                   f"{bins[0]['format']}) but no platform constraint was recorded - "
+                   "the deployment is locked to that OS/arch")
+    out += _io_problems(analysis)
     return out
 
 

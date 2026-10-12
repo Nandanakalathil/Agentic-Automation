@@ -28,7 +28,7 @@ def good_analysis() -> dict:
         "inference": {"file": "src/infer.py", "function_or_class": "predict",
                       "input_format": "FASTA string", "output_format": "PDB string"},
         "tests": {"framework": "pytest", "command": "pytest -q", "paths": ["tests"]},
-        "hardware": {"gpu_required": True, "min_gpu_memory_gb": 24.0},
+        "hardware": {"gpu_required": True, "min_gpu_memory_gb": 24.0, "peak_memory_gb": 24.0},
         "weights": {"source": "huggingface"},
         "license": "MIT",
         "metadata": {"model_name": "demo", "purpose": "fold proteins", "status": "active"},
@@ -228,3 +228,97 @@ def test_genuinely_different_licences_still_flagged(repo, declared, in_file):
     a = good_analysis()
     a["licensing"]["code"] = declared
     assert any("the file wins" in c for c in verify.contradictions(a, pf))
+
+
+# --- the EC2 planner's own prerequisites ------------------------------------
+# Each of these was a real gap found by comparing two analyses of the same repo:
+# the thin one omitted exactly these and still validated.
+
+def test_execution_flag_listed_as_input_is_flagged():
+    a = good_analysis()
+    a["inputs"].append({"name": "gpu", "format": "int", "required": True})
+    out = verify._io_problems(a)
+    assert any("execution flag" in m for m in out)
+    assert any("serving schema" in m for m in out)
+
+
+def test_real_inputs_are_not_flagged():
+    assert verify._io_problems(good_analysis()) == []
+
+
+@pytest.mark.parametrize("names", [["text", "text", "text"], ["json", "csv"]])
+def test_outputs_named_by_format_are_flagged(names):
+    a = good_analysis()
+    a["outputs"] = [{"name": n, "format": n} for n in names]
+    assert any("named by format" in m for m in verify._io_problems(a))
+
+
+def test_outputs_named_by_artefact_pass():
+    a = good_analysis()
+    a["outputs"] = [{"name": "example_top5.txt"}, {"name": "scores.json"}]
+    assert verify._io_problems(a) == []
+
+
+def test_missing_peak_memory_is_a_gap_when_gpu_required():
+    a = good_analysis()
+    a["hardware"]["peak_memory_gb"] = None
+    assert any("peak memory" in g for g in verify.completeness_gaps(a))
+
+
+def test_peak_memory_not_required_without_gpu():
+    a = good_analysis()
+    a["hardware"] = {"gpu_required": False}
+    assert not any("peak memory" in g for g in verify.completeness_gaps(a))
+
+
+def test_missing_call_path_is_a_gap():
+    a = good_analysis()
+    a["functions"] = []
+    assert any("call path" in g for g in verify.completeness_gaps(a))
+
+
+def test_readme_pins_the_analysis_ignored_are_reported(repo: Path):
+    (repo / "README.md").write_text(
+        "# demo\n\nDeveloped with Python 3.8.16, pytorch v1.13.1 and scipy 1.10.1.\n")
+    pf = preflight.scan(repo)
+    assert pf.readme_pins, "preflight should read pins out of README prose"
+    a = good_analysis()
+    a["version_pins"] = []
+    assert any("version pin" in c for c in verify.contradictions(a, pf))
+
+
+def test_recorded_pins_satisfy_the_check(repo: Path):
+    (repo / "README.md").write_text("# demo\n\nDeveloped with Python 3.8.16.\n")
+    pf = preflight.scan(repo)
+    a = good_analysis()
+    a["version_pins"] = [{"package": "Python", "version": "3.8.16", "confirmed": False}]
+    assert not any("version pin" in c for c in verify.contradictions(a, pf))
+
+
+def test_bundled_linux_binary_without_platform_constraint_is_reported(repo: Path):
+    binary = repo / "tools" / "mkdssp"
+    binary.parent.mkdir()
+    binary.write_bytes(b"\x7fELF\x02\x01\x01" + b"\x00" * 64)
+    binary.chmod(0o755)
+    pf = preflight.scan(repo)
+    assert pf.bundled_binaries and pf.bundled_binaries[0]["format"] == "ELF (Linux)"
+    assert any("platform constraint" in c for c in verify.contradictions(good_analysis(), pf))
+
+
+def test_declared_platform_constraint_clears_it(repo: Path):
+    binary = repo / "tools" / "mkdssp"
+    binary.parent.mkdir()
+    binary.write_bytes(b"\x7fELF\x02\x01\x01" + b"\x00" * 64)
+    binary.chmod(0o755)
+    pf = preflight.scan(repo)
+    a = good_analysis()
+    a["hardware"]["platform_constraint"] = "Linux x86-64: bundled ELF mkdssp"
+    assert not any("platform constraint" in c for c in verify.contradictions(a, pf))
+
+
+def test_python_source_is_not_mistaken_for_a_binary(repo: Path):
+    script = repo / "run.sh"
+    script.write_text("#!/bin/bash\necho hi\n")
+    script.chmod(0o755)
+    pf = preflight.scan(repo)
+    assert pf.bundled_binaries == []

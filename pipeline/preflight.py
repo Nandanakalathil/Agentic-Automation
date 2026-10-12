@@ -158,6 +158,8 @@ class Preflight:
     days_since_commit: int | None = None
     archived_hint: str = ""
     broken_scripts: list[dict] = field(default_factory=list)
+    readme_pins: list[dict] = field(default_factory=list)
+    bundled_binaries: list[dict] = field(default_factory=list)
 
     @property
     def is_bio(self) -> bool:
@@ -278,6 +280,81 @@ def _readme(root: Path) -> tuple[str, str]:
         if p.exists():
             return cand, _read(p, 120_000)
     return "", ""
+
+
+# "Python 3.8.16, numpy v1.24.3, pyg v2.3.0, pytorch v1.13.1, biopython v1.81"
+# Repos with no requirements.txt still pin everything - in a README sentence.
+# Missing this is how an analysis reports "0 build files" for a repo whose whole
+# environment is specified on line 7.
+# The trailing `,?` matters: environment sentences are comma-separated lists,
+# and "filelock, v3.12.1" is as common a shape as "filelock v3.12.1".
+_README_PIN_RE = re.compile(
+    r"\b([A-Za-z][A-Za-z0-9_.+-]{1,30}),?\s+v?(\d+(?:\.\d+){1,3})\b")
+# Words that take a version-like number without being packages.
+_PIN_STOPWORDS = {
+    "version", "release", "cuda", "ubuntu", "linux", "windows", "macos", "figure",
+    "table", "section", "step", "chapter", "equation", "page", "v", "see", "under",
+    "with", "and", "the", "using", "paper", "arxiv", "doi", "license", "licence",
+}
+
+
+def _readme_pins(readme_name: str, text: str) -> list[dict]:
+    """Package pins stated in README prose, with the line they came from.
+
+    Marked unconfirmed: prose is a claim about the author's machine, not a
+    lockfile. The planner still needs it - often it is all there is.
+    """
+    pins: list[dict] = []
+    seen: set[str] = set()
+    for lineno, line in enumerate(text.splitlines()[:400], start=1):
+        # Only lines that are actually talking about an environment.
+        if not re.search(r"\b(python|torch|pytorch|cuda|install|version|environment|develop|require)\b",
+                         line, re.I):
+            continue
+        for pkg, ver in _README_PIN_RE.findall(line):
+            key = pkg.lower()
+            if key in _PIN_STOPWORDS or key in seen or len(pins) >= 40:
+                continue
+            seen.add(key)
+            pins.append({"package": pkg, "version": ver,
+                         "source": f"{readme_name}:{lineno}", "confirmed": False})
+    return pins
+
+
+# Magic bytes, so the finding is "this file is an ELF x86-64 executable", not
+# "this file has no extension". A bundled Linux binary is a hard platform lock
+# that no amount of pip installing fixes.
+_MAGIC = {
+    b"\x7fELF": "ELF (Linux)",
+    b"\xcf\xfa\xed\xfe": "Mach-O (macOS)",
+    b"MZ": "PE (Windows)",
+}
+
+
+def _bundled_binaries(root: Path, limit: int = 12) -> list[dict]:
+    """Prebuilt executables committed to the repo, identified by magic bytes."""
+    found: list[dict] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+        for name in filenames:
+            p = Path(dirpath) / name
+            if p.suffix in {".py", ".md", ".txt", ".json", ".yml", ".yaml", ".sh", ".pkl", ".ckpt"}:
+                continue
+            try:
+                if not (p.stat().st_mode & 0o111) and p.suffix:
+                    continue
+                with p.open("rb") as fh:
+                    head = fh.read(4)
+            except OSError:
+                continue
+            for magic, kind in _MAGIC.items():
+                if head.startswith(magic):
+                    found.append({"path": str(p.relative_to(root)), "format": kind,
+                                  "size_mb": round(p.stat().st_size / 1e6, 1)})
+                    break
+            if len(found) >= limit:
+                return found
+    return found
 
 
 def _extract_links(text: str) -> dict[str, list[str]]:
@@ -475,12 +552,14 @@ def scan(workspace: Path) -> Preflight:
         pf.links = _extract_links(readme)
         low = readme[:4000].lower()
         pf.archived_hint = next((m for m in ARCHIVED_MARKERS if m in low), "")
+        pf.readme_pins = _readme_pins(readme_name, readme)
     pf.last_commit = _git(root, "log", "-1", "--format=%cs %h %s")[:200]
     pf.days_since_commit = _days_since(pf.last_commit)
     pf.tree = _tree(root)
     pf.assets, pf.notebooks, pf.sample_inputs = _collect_assets(root)
     pf.cli_entrypoints = _cli_entrypoints(root)
     pf.broken_scripts = _broken_scripts(root)
+    pf.bundled_binaries = _bundled_binaries(root)
     return pf
 
 
@@ -515,6 +594,13 @@ def to_prompt_block(pf: Preflight) -> str:
         f"- Python files that DO NOT PARSE: "
         + (", ".join(f"{b['path']} ({b['error']})" for b in pf.broken_scripts[:10])
            if pf.broken_scripts else "none"),
+        f"- Versions stated in README prose (UNCONFIRMED - no lockfile): "
+        + (", ".join(f"{p['package']} {p['version']} [{p['source']}]" for p in pf.readme_pins[:25])
+           if pf.readme_pins else "none"),
+        f"- Prebuilt binaries committed to the repo: "
+        + (", ".join(f"{b['path']} = {b['format']}, {b['size_mb']} MB" for b in pf.bundled_binaries)
+           if pf.bundled_binaries else "none")
+        + ("  <- these lock the deployment to that OS/arch" if pf.bundled_binaries else ""),
         "",
         "Repository structure (directories, file counts):",
         *(f"    {line}" for line in pf.tree[:40]),

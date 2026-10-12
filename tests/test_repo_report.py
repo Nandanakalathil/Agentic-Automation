@@ -297,3 +297,74 @@ def test_real_suite_still_renders_the_table():
 def test_a_command_without_a_named_framework_still_counts_as_tests():
     out = render(tests={"framework": "", "command": "make test"})
     assert "`make test`" in out and "No test suite" not in out
+
+
+# --- sections the EC2 planner reads -----------------------------------------
+
+def test_bugs_render_worst_first_and_carry_their_trigger():
+    md = reports._bugs_block([
+        {"title": "Crashes without --gpu", "severity": "crash",
+         "trigger": "any run omitting the flag", "evidence": "main.py:10", "confirmed": True},
+        {"title": "Stale active sites", "severity": "wrong_output",
+         "trigger": "any FASTA but the bundled one", "evidence": "utils.py:80"},
+    ])
+    assert md.index("Stale active sites") < md.index("Crashes without --gpu")
+    assert "any run omitting the flag" in md and "`main.py:10`" in md
+    assert "verified" in md and "reported" in md
+
+
+def test_no_bugs_renders_nothing():
+    assert reports._bugs_block([]) == ""
+    assert reports._bottlenecks_block([]) == ""
+    assert reports._pins_block([], {}) == ""
+
+
+def test_pins_separate_prose_from_lockfile():
+    md = reports._pins_block([
+        {"package": "torch", "version": "1.13.1", "source": "README.md:7", "confirmed": False},
+        {"package": "numpy", "version": "1.24.3", "source": "requirements.txt:2", "confirmed": True},
+    ], {"dependency_files": ["requirements.txt"]})
+    assert "README prose" in md and "dependency file" in md
+
+
+def test_unpinned_imports_are_counted_not_hidden():
+    md = reports._pins_block(
+        [{"package": "transformers", "version": "", "source": "features.py:2"}], {})
+    assert "_unpinned_" in md
+    assert "pinned nowhere" in md
+    assert "No dependency file" in md
+
+
+def test_prebuilt_binaries_appear_in_compute_requirements():
+    md = reports.repo_analysis(
+        {"repo": "r", "run_id": "x"},
+        {"summary": "s", "task": "t", "hardware": {"gpu_required": True}},
+        "")
+    assert "Prebuilt binaries" not in md
+    md2 = reports.repo_analysis(
+        {"repo": "r", "run_id": "x"},
+        {"summary": "s", "task": "t", "hardware": {"gpu_required": True},
+         "preflight": {"bundled_binaries": [{"path": "tools/diamond", "format": "ELF (Linux)"}]}},
+        "")
+    assert "tools/diamond" in md2 and "fix the OS" in md2
+
+
+def test_readme_pins_render_even_when_the_analyst_recorded_none():
+    md = reports.repo_analysis(
+        {"repo": "r", "run_id": "x"},
+        {"summary": "s", "task": "t",
+         "preflight": {"readme_pins": [
+             {"package": "pytorch", "version": "1.13.1", "source": "README.md:7", "confirmed": False}]}},
+        "")
+    assert "Environment and versions" in md and "1.13.1" in md
+
+
+def test_call_path_shows_edges():
+    md = reports.repo_analysis(
+        {"repo": "r", "run_id": "x"},
+        {"summary": "s", "task": "t",
+         "functions": [{"file": "main.py", "name": "predict", "evidence": "main.py:64",
+                        "called_by": "main", "calls": "GraphEC.forward"}]},
+        "")
+    assert "Inference call path" in md
+    assert "`main.py:64`" in md and "GraphEC.forward" in md

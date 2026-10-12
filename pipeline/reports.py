@@ -206,6 +206,56 @@ def _code(v) -> str:
     return f"`{s[:80]}`" if s else "-"
 
 
+def _bugs_block(bugs: list[dict]) -> str:
+    """Defects ordered by how badly they fail, not by discovery order.
+
+    wrong_output ranks above crash deliberately: a crash tells you it failed,
+    while a silently wrong answer gets deployed and believed.
+    """
+    if not bugs:
+        return ""
+    rank = {"wrong_output": 0, "crash": 1, "performance": 2, "dormant": 3}
+    rows = []
+    for b in sorted(bugs, key=lambda x: rank.get(x.get("severity", "crash"), 9)):
+        seen = "verified" if b.get("confirmed") else "reported"
+        rows.append(
+            f"| {b.get('severity', 'crash')} | **{b.get('title', '')}** {b.get('detail', '')} "
+            f"| {b.get('trigger') or '-'} | `{b.get('evidence') or '-'}` | {seen} |")
+    return ("## Known bugs\n| Severity | What | Fires when | Evidence | |\n|---|---|---|---|---|\n"
+            + "\n".join(rows) + "\n\n")
+
+
+def _bottlenecks_block(items: list[dict]) -> str:
+    if not items:
+        return ""
+    rows = "\n".join(f"| **{b.get('title', '')}** {b.get('detail', '')} | `{b.get('evidence') or '-'}` |"
+                     for b in items)
+    return f"## Performance bottlenecks\n| What | Evidence |\n|---|---|\n{rows}\n\n"
+
+
+def _pins_block(pins: list[dict], a: dict) -> str:
+    """The environment table. Unpinned-but-imported packages are the point.
+
+    A reader skims this to build the image; the rows with an empty version are
+    where the build will drift, so they are kept rather than filtered out.
+    """
+    if not pins:
+        return ""
+    rows = []
+    for p in pins:
+        where = "dependency file" if p.get("confirmed") else "README prose"
+        rows.append(f"| `{p.get('package', '')}` | {p.get('version') or '_unpinned_'} "
+                    f"| {where} | `{p.get('source') or '-'}` |")
+    loose = sum(1 for p in pins if not p.get("version"))
+    note = (f"\n{loose} dependency/-ies are imported but pinned nowhere - they will resolve to whatever "
+            "is current at build time.\n" if loose else "")
+    dep_files = ", ".join(a.get("dependency_files") or [])
+    head = ("" if dep_files else
+            "\n**No dependency file in the repo.** Every version below is a claim in prose, not a lock.\n")
+    return (f"## Environment and versions\n{head}| Package | Version | Stated in | Source |\n"
+            f"|---|---|---|---|\n" + "\n".join(rows) + f"\n{note}\n")
+
+
 def repo_analysis(state: dict, analysis: dict, agent_text: str) -> str:
     a = analysis
     m, lic, hw = a.get("metadata") or {}, a.get("licensing") or {}, a.get("hardware") or {}
@@ -265,8 +315,20 @@ def repo_analysis(state: dict, analysis: dict, agent_text: str) -> str:
 
     # `or []`, not a get() default: LLM-repaired JSON sets missing lists to null,
     # which a default never catches.
-    fns = "\n".join(f"| `{f['file']}` | `{f['name']}` | `{f.get('signature', '')}` | {f.get('purpose', '')} |"
-                    for f in a.get("functions") or []) or "| _none_ | | | |"
+    fns = "\n".join(
+        f"| `{f.get('evidence') or f['file']}` | `{f['name']}` | {f.get('purpose', '')} "
+        f"| {f.get('called_by') or '-'} | {f.get('calls') or '-'} |"
+        for f in a.get("functions") or []) or "| _none_ | | | | |"
+
+    # The analyst's pins win where it recorded them; preflight's README scan is
+    # the floor, so a thin analysis still ships a usable environment table.
+    pins = list(a.get("version_pins") or [])
+    if not pins:
+        pins = list(pf.get("readme_pins") or [])
+    else:
+        known = {str(p.get("package", "")).lower() for p in pins}
+        pins += [p for p in (pf.get("readme_pins") or [])
+                 if str(p.get("package", "")).lower() not in known]
 
     flow_md = flow_diagram(a.get("flow") or [])
     return (
@@ -289,8 +351,14 @@ def repo_analysis(state: dict, analysis: dict, agent_text: str) -> str:
         f"## Compute requirements\n| | |\n|---|---|\n"
         f"| GPU required | {hw.get('gpu_required')} |\n| Runs on CPU | {hw.get('cpu_only_supported')} |\n"
         f"| Min GPU memory | {hw.get('min_gpu_memory_gb') or '-'} GB |\n| Peak memory | {_mem(hw)} |\n"
-        f"| Min RAM | {hw.get('min_ram_gb') or '-'} GB |\n| Disk | {hw.get('disk_gb') or '-'} GB |\n"
-        f"| Typical runtime | {hw.get('approx_runtime') or '-'} |\n| Notes | {hw.get('notes', '')} |\n\n"
+        f"| Min RAM | {hw.get('min_ram_gb') or '-'} GB |\n| Disk (repo + weights) | {hw.get('disk_gb') or '-'} GB |\n"
+        + (f"| Downloaded at runtime | {hw['external_download_gb']} GB (additional) |\n"
+           if hw.get("external_download_gb") else "")
+        + (f"| Platform | {hw['platform_constraint']} |\n" if hw.get("platform_constraint") else "")
+        + (f"| Prebuilt binaries | "
+           + ", ".join(f"`{b['path']}` {b['format']}" for b in pf.get("bundled_binaries") or [])
+           + " - these fix the OS and architecture |\n" if pf.get("bundled_binaries") else "")
+        + f"| Typical runtime | {hw.get('approx_runtime') or '-'} |\n| Notes | {hw.get('notes', '')} |\n\n"
         f"## Weights\n- Source: {w.get('source', '')}\n- Location/ID: `{w.get('location_or_id', '')}`\n"
         f"- Size: {w.get('approx_size_gb')} GB\n- Download: {w.get('download_instructions', '')}\n\n"
         f"## Licensing\n| | |\n|---|---|\n| Code | {lic.get('code') or a.get('license') or '-'} "
@@ -298,10 +366,14 @@ def repo_analysis(state: dict, analysis: dict, agent_text: str) -> str:
         f"({lic.get('weights_source') or '-'}) |\n| Commercial use | {lic.get('commercial_use') or 'unclear'} |\n"
         f"| Attribution required | {lic.get('attribution_required', False)} |\n| Notes | {lic.get('notes', '')} |\n\n"
         f"## Tests\n{_tests_block(t)}\n"
-        f"## Functions and classes\n| File | Name | Signature | Purpose |\n|---|---|---|---|\n{fns}\n\n"
-        f"## Dependencies\n- Files: {', '.join(a.get('dependency_files', []))}\n"
-        f"- Notable: {', '.join(a.get('notable_dependencies', []))}\n"
-        f"- Python: {a.get('python_version') or '-'}; frameworks: {', '.join(a.get('frameworks', [])) or '-'}\n\n"
+        + _bugs_block(a.get("known_bugs") or [])
+        + _bottlenecks_block(a.get("bottlenecks") or [])
+        + f"## Inference call path\n| Defined at | Name | Purpose | Called by | Calls |\n"
+          f"|---|---|---|---|---|\n{fns}\n\n"
+        + _pins_block(pins, a)
+        + f"## Dependencies\n- Notable: {', '.join(a.get('notable_dependencies') or []) or '-'}\n"
+          f"- Python: {a.get('python_version') or '-'}; frameworks: "
+          f"{', '.join(a.get('frameworks') or []) or '-'}\n\n"
         + _extra_risks(a.get("risks") or [], a.get("alerts") or [])
     )
 
